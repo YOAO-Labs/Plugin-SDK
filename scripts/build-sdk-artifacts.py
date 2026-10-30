@@ -12,7 +12,7 @@ import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = ("packages/inference-sdk", "packages/inference-runtime", "packages/inference-mask-utils")
+PACKAGES = ("packages/inference/sdk", "packages/inference/runtime", "packages/inference/mask-utils")
 
 
 def sha(path):
@@ -30,7 +30,7 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     env = {**os.environ, "SOURCE_DATE_EPOCH": str(epoch), "PYTHONHASHSEED": "0"}
     archive = output / "sdk-source.tar"
-    # Restrict source to the three SDK capabilities and their top-level license/readme.
+    # Restrict source to the inference packages and their top-level license/readme.
     subprocess.run(["git", "archive", "--format=tar", "--output", str(archive), revision, "README.md", "LICENSE", *PACKAGES], cwd=ROOT, check=True)
     with tempfile.TemporaryDirectory(prefix="sdk-artifacts-") as temp:
         source = Path(temp) / "source"

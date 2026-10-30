@@ -4,11 +4,13 @@ This repository publishes capability-scoped SDKs for independent plugin authors;
 
 | Path | Python distribution | Purpose |
 | --- | --- | --- |
-| `packages/inference-sdk` | `aap-inference-plugin-sdk` | Detection author interfaces, HTTP adapter and author tooling |
-| `packages/inference-runtime` | `aap-backend-runtime` | Inference execution, cancellation and managed lifecycle helpers |
-| `packages/inference-mask-utils` | `anno-mask-utils` | Mask conversion helpers |
+| `packages/inference/sdk` | `aap-inference-plugin-sdk` | Detection author interfaces, HTTP adapter and author tooling |
+| `packages/inference/runtime` | `aap-backend-runtime` | Inference execution, cancellation and managed lifecycle helpers |
+| `packages/inference/mask-utils` | `anno-mask-utils` | Mask conversion helpers |
 
 UI, trainers and data export may gain separate capability packages when implemented; they do not inherit detection, HTTP or GPU APIs merely to be plugins. First-party SDK code is [MIT](LICENSE); third-party dependencies and assets retain their own terms.
+
+Inference code is grouped under one capability directory, `packages/inference/`. Its three installable distributions remain separate: runtime and mask consumers support Python 3.10 and must not inherit the author SDK's Python 3.11 requirement or development-service dependencies.
 
 ## Portable contracts and local development
 
@@ -20,10 +22,10 @@ python3 -m venv .venv
 python -m pip install build 'setuptools>=68' wheel pytest pytest-asyncio
 python scripts/fetch-contracts.py /tmp/aap-contracts
 python -m pip install /tmp/aap-contracts/*.whl
-python -m pip install -e packages/inference-runtime -e packages/inference-sdk -e packages/inference-mask-utils
-python -m pytest packages/inference-runtime/tests
-python -m pytest packages/inference-sdk/tests
-python -m pytest packages/inference-mask-utils/tests
+python -m pip install -e packages/inference/runtime -e packages/inference/sdk -e packages/inference/mask-utils
+python -m pytest packages/inference/runtime/tests
+python -m pytest packages/inference/sdk/tests
+python -m pytest packages/inference/mask-utils/tests
 ```
 
 For author commands and their arguments, use `aap-inference-plugin --help`, `aap-inference-plugin build --help`, and `aap-inference-plugin check --help`. `aap-inference-plugin build /path/to/your-plugin` builds a wheel. HTTP checks require a running service and fixture data; GPU qualification requires explicit exclusive hardware and evidence. Neither a successful wheel build nor an HTTP check grants platform-managed qualification or permission to redistribute models. See the inference SDK package documentation for author workflow and provider requirements.

@@ -7,8 +7,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import shutil
+import socket
 import subprocess
 import sys
+import tempfile
+import time
 
 import httpx
 
@@ -60,15 +65,16 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from PIL import ImageChops
 from PIL.Image import Image
 from aap_inference_plugin import Detection, DetectionConfig, DetectionModel, create_detection_app
 import uvicorn
 
 
 class ColorRegionModel:
-    """One box enclosing all pixels with red >= 200 and green/blue <= 80."""
+    """One enclosing box per dominant red, green or blue region."""
 
-    classes = ("red-region",)
+    classes = ("red-region", "green-region", "blue-region")
 
     def __init__(self) -> None:
         self.closed = False
@@ -76,13 +82,17 @@ class ColorRegionModel:
     def predict(self, image: Image, parameters: Mapping[str, Any]) -> Sequence[Detection]:
         if self.closed:
             raise RuntimeError("model is closed")
-        red, green, blue = image.convert("RGB").split()
-        mask = red.point(lambda value: 255 if value >= 200 else 0)
-        from PIL import ImageChops
-        mask = ImageChops.multiply(mask, green.point(lambda value: 255 if value <= 80 else 0))
-        mask = ImageChops.multiply(mask, blue.point(lambda value: 255 if value <= 80 else 0))
-        box = mask.getbbox()
-        return [Detection(*box, class_index=0, score=1.0)] if box else []
+        channels = image.convert("RGB").split()
+        detections = []
+        for index, channel in enumerate(channels):
+            mask = channel.point(lambda value: 255 if value >= 200 else 0)
+            for other_index, other in enumerate(channels):
+                if other_index != index:
+                    mask = ImageChops.multiply(mask, other.point(lambda value: 255 if value <= 80 else 0))
+            box = mask.getbbox()
+            if box:
+                detections.append(Detection(*box, class_index=index, score=1.0))
+        return detections
 
     def close(self) -> None:
         self.closed = True
@@ -90,8 +100,8 @@ class ColorRegionModel:
 
 class Provider:
     def load(self, model_id: str, device: str, config: Mapping[str, Any]) -> DetectionModel:
-        if model_id != "red" or device != "cpu":
-            raise ValueError("color-region example supports only red on cpu")
+        if model_id != "colors" or device != "cpu":
+            raise ValueError("color-region example supports only colors on cpu")
         return ColorRegionModel()
 
 
@@ -100,16 +110,84 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     serve = sub.add_parser("serve")
     serve.add_argument("--token-file", type=Path, required=True)
+    serve.add_argument("--device", choices=["cpu"], default="cpu")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
     token = args.token_file.read_text(encoding="utf-8").strip()
-    config = DetectionConfig(token=token, device="cpu", catalog={"red": {}},
-                             default_model="red", series="color-region")
+    config = DetectionConfig(token=token, device=args.device, catalog={"colors": {}},
+                             default_model="colors", series="color-region")
     uvicorn.run(create_detection_app(Provider(), config), host=args.host, port=args.port)
 ''',
         encoding="utf-8",
     )
+
+
+def dev_server(args) -> None:
+    """Warm an installed detection provider on loopback without host authority."""
+    token = args.token_file.read_text(encoding="utf-8").strip()
+    if len(token) < 32:
+        raise ValueError("token file must contain at least 32 characters")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.entrypoint):
+        raise ValueError("--entrypoint must name an installed console script")
+    executable = shutil.which(args.entrypoint)
+    if executable is None:
+        raise ValueError(f"installed console script {args.entrypoint!r} was not found")
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", args.port))
+    extra = args.serve_args
+    if extra[:1] == ["--"]:
+        extra = extra[1:]
+    reserved = {"--host", "--port", "--token-file", "--device"}
+    if any(value.split("=", 1)[0] in reserved for value in extra):
+        raise ValueError("provider arguments cannot override development host, port, token or device")
+    command = [executable, "serve", "--device", args.device,
+               "--token-file", str(args.token_file.resolve()),
+               "--host", "127.0.0.1", "--port", str(args.port), *extra]
+    with tempfile.TemporaryDirectory(prefix="aap-inference-dev-") as state:
+        environment = {key: value for key, value in os.environ.items()
+                       if not key.startswith(("AAP_ROUTE_", "AAP_PLUGIN_"))}
+        environment["AAP_PLUGIN_DATA_DIR"] = state
+        process = subprocess.Popen(command, env=environment)
+        try:
+            with httpx.Client(base_url=f"http://127.0.0.1:{args.port}", timeout=120,
+                              trust_env=False,
+                              headers={"Authorization": "Bearer " + token}) as client:
+                deadline = time.monotonic() + 60
+                while time.monotonic() < deadline:
+                    if process.poll() is not None:
+                        raise ValueError(f"developer service exited before readiness: {process.returncode}")
+                    try:
+                        if client.get("/health", timeout=2).status_code == 200:
+                            break
+                    except httpx.HTTPError:
+                        pass
+                    time.sleep(0.1)
+                else:
+                    raise ValueError("developer service did not become ready")
+                response = client.post("/warmup", json={"task": "detect"})
+                response.raise_for_status()
+                health = client.get("/health")
+                health.raise_for_status()
+                info = health.json()
+                if (info.get("compute", {}).get("effective_device") != args.device
+                        or info.get("pool", {}).get("current_size", 0) < 1):
+                    raise ValueError("preflight did not load the provider on the requested device")
+                if (args.device.startswith("cuda:")
+                        and info.get("residency", {}).get("gpu_loaded") is not True):
+                    raise ValueError("preflight did not establish CUDA residency")
+            print("Developer provider ready; this is not platform-managed qualification", flush=True)
+            code = process.wait()
+            if code:
+                raise ValueError(f"developer service exited with status {code}")
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
 
 
 def main() -> None:
@@ -117,6 +195,13 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init")
     init.add_argument("directory", type=Path)
+    dev = commands.add_parser("dev")
+    dev.add_argument("--entrypoint", required=True)
+    dev.add_argument("--device", required=True)
+    dev.add_argument("--token-file", type=Path, required=True)
+    dev.add_argument("--port", type=int, default=8000)
+    dev.add_argument("serve_args", nargs=argparse.REMAINDER,
+                     help="Provider-specific serve arguments after --")
     verify = commands.add_parser("check")
     mode = verify.add_mutually_exclusive_group(required=True)
     mode.add_argument("--url", help="Check a running HTTP endpoint only")
@@ -152,6 +237,8 @@ def main() -> None:
     try:
         if args.command == "init":
             init_project(args.directory)
+        elif args.command == "dev":
+            dev_server(args)
         elif args.command == "check":
             if args.qualify_local:
                 if not (

@@ -7,7 +7,7 @@
 ## 安装（开发模式）
 
 ```bash
-cd packages/inference-mask-utils
+cd packages/inference/mask-utils
 pip install -e ".[test]"
 pytest -v
 ```
@@ -30,6 +30,11 @@ poly = mask_to_polygon(mask, tolerance=1.0)
 # 归一化到 [0, 1]（Label Studio polygonlabels 风格）
 poly_norm = mask_to_polygon(mask, tolerance=1.0, normalize_to=(512, 512))
 ```
+
+## 独立评测
+
+安装本包后，从 SDK 仓库运行 `python packages/inference/mask-utils/scripts/eval_simplify.py --masks-dir /private/masks --out /private/mask-evaluation.md`。输入为显式提供的二值 PNG；评测原掩码与多边形重栅格化的 IoU、顶点和多连通域行为。私有样本与报告不进入公开仓库，也不以合成样本替代既有真实数据资格。
+
 
 ## API
 

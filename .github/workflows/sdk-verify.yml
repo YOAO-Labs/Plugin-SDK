@@ -1,4 +1,4 @@
-name: SDK
+name: SDK verification
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
 
 jobs:
   runtime-contracts:
+    name: SDK runtime contracts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,8 +23,9 @@ jobs:
       - name: Exercise runtime
         run: |
           python -c 'from aap_backend_runtime import versions_payload; assert versions_payload("model", "backend") == {"versions": ["model"], "backend_version": "backend"}'
-          python -m pytest packages/inference-runtime/tests
+          python -m pytest packages/inference/runtime/tests
   inference-author-sdk:
+    name: SDK inference authoring
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,8 +42,9 @@ jobs:
         run: |
           python -c 'from aap_inference_plugin import Detection, create_detection_app; print(Detection.__name__, create_detection_app.__name__)'
           aap-inference-plugin --help
-          python -m pytest packages/inference-sdk/tests
+          python -m pytest packages/inference/sdk/tests
   inference-mask-utils:
+    name: SDK mask utilities
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,4 +59,4 @@ jobs:
       - name: Exercise mask utilities
         run: |
           python -c 'import numpy as np; from mask_utils import mask_to_polygon; assert mask_to_polygon(np.zeros((8, 8), dtype=np.uint8)) == []'
-          python -m pytest packages/inference-mask-utils/tests
+          python -m pytest packages/inference/mask-utils/tests
