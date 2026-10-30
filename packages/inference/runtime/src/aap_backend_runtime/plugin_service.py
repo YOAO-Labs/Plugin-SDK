@@ -158,8 +158,9 @@ def plugin_verified_lifecycle(
         "registry_id": registry,
         "gpu_resource_id": resource,
         "pools": dict(pool_topology),
-        "session_counts": dict(session_counts),
     }
+    if session_counts:
+        topology["session_counts"] = dict(session_counts)
     weight_set = {
         (item.get("sha256"), item.get("size_bytes")) for item in expected_weights
     }

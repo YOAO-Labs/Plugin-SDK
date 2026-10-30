@@ -18,6 +18,8 @@ Python 3.11 or newer is needed for all three packages together. The platform is 
 
 Managed checkpoint compatibility requires an explicit `format`: `null` identifies a native checkpoint without a separate export-format identity; named formats use nonempty strings. Null is not a wildcard, and omitting the field is invalid. The platform still matches the approved manifest, observed capabilities, checkpoint receipt and runtime device.
 
+Native Torch lifecycle reports describe their model pools without an empty `session_counts` field. ONNX Runtime plugins additionally record the actual per-pool session counts and CUDA provider observations; the runtime checks those against the complete report rather than treating a missing session as qualified.
+
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate

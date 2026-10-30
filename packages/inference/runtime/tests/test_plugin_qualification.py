@@ -187,3 +187,18 @@ def test_workload_evidence_cannot_override_native_topology(qualification):
     save(report)
     with pytest.raises(ValueError, match="measured"):
         plugin_verified_lifecycle(**args)
+
+
+def test_torch_report_uses_native_pool_topology_without_ort_sessions(qualification):
+    report, save, args = qualification
+    args["runtime_versions"].pop("onnxruntime")
+    args["runtime_versions"]["torch"] = "2.14.1+cu132"
+    versions = report["deployment"]["runtime_versions"]
+    versions.pop("onnxruntime")
+    versions["torch"] = args["runtime_versions"]["torch"]
+    args["session_counts"] = {}
+    report["deployment"]["pool_topology"].pop("session_counts")
+    for cycle in report["cycles"]:
+        cycle.pop("session_observations")
+    save(report)
+    assert plugin_verified_lifecycle(**args) is True
