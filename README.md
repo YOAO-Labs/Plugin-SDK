@@ -21,7 +21,9 @@ python -m pip install build 'setuptools>=68' wheel pytest pytest-asyncio
 python scripts/fetch-contracts.py /tmp/aap-contracts
 python -m pip install /tmp/aap-contracts/*.whl
 python -m pip install -e packages/inference-runtime -e packages/inference-sdk -e packages/inference-mask-utils
-python -m pytest packages/inference-runtime/tests packages/inference-sdk/tests packages/inference-mask-utils/tests
+python -m pytest packages/inference-runtime/tests
+python -m pytest packages/inference-sdk/tests
+python -m pytest packages/inference-mask-utils/tests
 ```
 
 For author commands and their arguments, use `aap-inference-plugin --help`, `aap-inference-plugin build --help`, and `aap-inference-plugin check --help`. `aap-inference-plugin build /path/to/your-plugin` builds a wheel. HTTP checks require a running service and fixture data; GPU qualification requires explicit exclusive hardware and evidence. Neither a successful wheel build nor an HTTP check grants platform-managed qualification or permission to redistribute models. See the inference SDK package documentation for author workflow and provider requirements.
