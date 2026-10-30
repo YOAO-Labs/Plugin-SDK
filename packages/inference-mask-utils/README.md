@@ -7,25 +7,13 @@
 ## 安装（开发模式）
 
 ```bash
-cd packages/mask-utils
+cd packages/inference-mask-utils
 pip install -e ".[test]"
 pytest -v
 ```
 
 RLE 黄金用例 `tests/fixtures/rasterMaskRle.json` 是平台源码 `apps/web/src/__fixtures__/rasterMaskRle.json` 在提交 `0a21bc402432aa93a80fcb9f12d2f532e7109635` 的冻结一致性快照，SHA256 为 `f1dbba03cfb982dd0d747ceb424da267f63fc0132109c4025508cbfe99453f0b`。平台源码仍是唯一权威来源；不得在本仓库静默修改或独立维护这些用例。
 
-## 私有真实 mask 评测
-
-公开仓库只含合成测试数据和 RLE 黄金用例。原平台快照中的 84 张真实 SAM mask 来自数据集，不获公开再分发授权；维护者应从受控私有位置提供原始 fixture 目录并在仓库外保存报告：
-
-```bash
-python scripts/eval_simplify.py \
-  --masks-dir /private/real-sam-masks \
-  --tolerances 0.5,1.0,2.0,3.0,5.0 \
-  --out /private/mask-evaluation.md
-```
-
-从仓库根目录运行，先安装本包的依赖。脚本同时计算单 polygon 和多连通域/空洞的 IoU 与顶点统计；不要把输入或报告添加到公开源码制品。
 
 ## 用法
 

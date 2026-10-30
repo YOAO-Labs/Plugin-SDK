@@ -1,19 +1,39 @@
 # Plugin SDK
 
-面向自定义插件作者的能力 SDK 仓库。官方模型实现、模型专属适配与预训练权重目录归 [YOAO-Plugins](https://github.com/YOAO-Labs/YOAO-Plugins)，平台 API SDK、公共契约源码、权限和业务治理归平台仓库。
+This repository publishes capability-scoped SDKs for independent plugin authors; it is not the platform or a distribution of official plugins. [YOAO-Plugins](https://github.com/YOAO-Labs/YOAO-Plugins) owns official implementations and their model-specific assets. The [platform](https://github.com/YOAO-Labs/ai-annotation-platform) owns API SDKs, portable contract **source**, authorization, storage and governance; the SDK consumes published contracts rather than duplicating platform rules.
 
-## 能力边界
+| Path | Python distribution | Purpose |
+| --- | --- | --- |
+| `packages/inference-sdk` | `aap-inference-plugin-sdk` | Detection author interfaces, HTTP adapter and author tooling |
+| `packages/inference-runtime` | `aap-backend-runtime` | Inference execution, cancellation and managed lifecycle helpers |
+| `packages/inference-mask-utils` | `anno-mask-utils` | Mask conversion helpers |
 
-当前实现归属推理能力，不把检测模型接口或 GPU 生命周期当作所有插件的通用基类：
+UI, trainers and data export may gain separate capability packages when implemented; they do not inherit detection, HTTP or GPU APIs merely to be plugins. First-party SDK code is [MIT](LICENSE); third-party dependencies and assets retain their own terms.
 
-| 目录 | 内容 |
-| --- | --- |
-| `packages/inference-sdk` | Python 推理插件作者接口、HTTP 适配、开发工具与一致性检查 |
-| `packages/inference-runtime` | 推理服务的执行、取消、资源池和受管生命周期支撑 |
-| `packages/inference-mask-utils` | 推理结果的 Mask 编解码工具 |
+## Portable contracts and local development
 
-UI、训练器、数据导出将在实际能力实现时采用独立的能力包、依赖和一致性检查；不预建空包，也不要求它们依赖推理运行时或模型框架。只有真正跨能力复用的契约进入公共层。身份、协议兼容与权限的权威定义仍由平台维护，SDK 消费便携契约制品，不复制业务规则。
+Python 3.11 or newer is needed for all three packages together. The platform is the authoritative contract source; its five portable wheels are mirrored for anonymous distribution in this SDK repository's immutable [`contracts-3d6393e64630` release](https://github.com/YOAO-Labs/Plugin-SDK/releases/tag/contracts-3d6393e64630). The fetcher pins the manifest SHA-256 `d3749d2a7429da60c02e222c65e9c4a5ec545b050b797422263d5a3bcb02ddec`, checks platform source revision `3d6393e64630fdeb6ff699b13c2d1f9e198a1a06`, and verifies every wheel against that manifest. It needs no platform checkout or GitHub credentials.
 
-每个 SDK 包独立声明 Python／平台契约兼容要求。公开抽象和内部执行机制分开；自定义插件负责自己的实现、依赖与资产描述，平台负责授权、调度和结果提交。
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install build setuptools wheel pytest pytest-asyncio
+python scripts/fetch-contracts.py /tmp/aap-contracts
+python -m pip install /tmp/aap-contracts/*.whl
+python -m pip install -e packages/inference-runtime -e packages/inference-sdk -e packages/inference-mask-utils
+python -m pytest packages/inference-runtime/tests packages/inference-sdk/tests packages/inference-mask-utils/tests
+```
 
-第一方代码采用 [MIT](LICENSE)。第三方库及用户模型的许可证不随 SDK 重新授权。
+For author commands and their arguments, use `aap-inference-plugin --help`, `aap-inference-plugin build --help`, and `aap-inference-plugin check --help`. `aap-inference-plugin build /path/to/your-plugin` builds a wheel. HTTP checks require a running service and fixture data; GPU qualification requires explicit exclusive hardware and evidence. Neither a successful wheel build nor an HTTP check grants platform-managed qualification or permission to redistribute models. See the inference SDK package documentation for author workflow and provider requirements.
+
+## Building source release inputs
+
+The initial SDK extraction is SDK commit `182d20dd0d84abe864d44fdb29d89dcf8de375a2`, extracted from the shared packages in YOAO-Plugins; its own repository history is the provenance for subsequent SDK changes. Platform portable contracts have a separate provenance above. Build only from an explicit SDK commit; uncommitted working-tree changes are not included:
+
+```sh
+python -m pip install build setuptools wheel
+python scripts/build-sdk-artifacts.py --revision HEAD --output /tmp/aap-sdk-release
+(cd /tmp/aap-sdk-release && sha256sum -c SHA256SUMS)
+```
+
+The output contains a source tar archive, wheel and sdist for each of the three packages, `manifest.json` with exact source repository/revision, builder versions and artifact SHA-256 hashes, and `SHA256SUMS` (including the manifest). The source archive is restricted to the three SDK package trees and root license/readme. It does not distribute platform source, official plugin implementations, model catalogs, native loaders or model weights. The repository owns publication separately; a local build does not publish anything.
