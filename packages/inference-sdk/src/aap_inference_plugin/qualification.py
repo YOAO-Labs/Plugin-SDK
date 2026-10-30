@@ -1,4 +1,4 @@
-"""Run bounded, explicitly local-exclusive LibreYOLO and lifecycle qualification."""
+"""Run bounded, explicitly local-exclusive provider GPU and lifecycle qualification."""
 from __future__ import annotations
 
 import asyncio

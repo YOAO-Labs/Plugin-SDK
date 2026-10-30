@@ -7,13 +7,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
-import shutil
-import socket
 import subprocess
 import sys
-import time
-import tempfile
 
 import httpx
 
@@ -26,12 +21,10 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "my-libreyolo-plugin"
+name = "my-color-region-plugin"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "aap-libreyolo-plugin==0.1.0",
-    "aap-libreyolo-native==0.1.0",
     "aap-inference-plugin-sdk==0.1.0",
     "aap-backend-runtime==0.1.0",
     "aap-inference-contract==0.1.0",
@@ -39,212 +32,91 @@ dependencies = [
     "aap-protocol-v2==0.2.0",
     "aap-task-contract==0.1.0",
     "aap-training-contract==0.1.0",
-    "torch==2.14.1+cu132",
-    "torchvision==0.29.1+cu132",
 ]
 
 [project.scripts]
-my-libreyolo-plugin = "my_libreyolo_plugin:main"
+my-color-region-plugin = "my_color_region_plugin:main"
 
 [tool.setuptools]
-py-modules = ["my_libreyolo_plugin"]
+py-modules = ["my_color_region_plugin"]
 
 [tool.uv.sources]
-aap-libreyolo-plugin = { url = "https://github.com/YOAO-Labs/YOAO-Plugins/releases/download/python-6118885dd686/aap_libreyolo_plugin-0.1.0-py3-none-any.whl" }
-aap-libreyolo-native = { url = "https://github.com/YOAO-Labs/YOAO-Plugins/releases/download/python-6118885dd686/aap_libreyolo_native-0.1.0-py3-none-any.whl" }
-aap-inference-plugin-sdk = { url = "https://github.com/YOAO-Labs/YOAO-Plugins/releases/download/python-6118885dd686/aap_inference_plugin_sdk-0.1.0-py3-none-any.whl" }
-aap-backend-runtime = { url = "https://github.com/YOAO-Labs/YOAO-Plugins/releases/download/python-6118885dd686/aap_backend_runtime-0.1.0-py3-none-any.whl" }
-aap-inference-contract = { url = "https://github.com/YOAO-Labs/YOAO-Plugins/releases/download/contracts-0a21bc402432/aap_inference_contract-0.1.0-py3-none-any.whl" }
-aap-lifecycle-contract = { url = "https://github.com/YOAO-Labs/YOAO-Plugins/releases/download/contracts-0a21bc402432/aap_lifecycle_contract-0.1.0-py3-none-any.whl" }
-aap-protocol-v2 = { url = "https://github.com/YOAO-Labs/YOAO-Plugins/releases/download/contracts-0a21bc402432/aap_protocol_v2-0.2.0-py3-none-any.whl" }
-aap-task-contract = { url = "https://github.com/YOAO-Labs/YOAO-Plugins/releases/download/contracts-0a21bc402432/aap_task_contract-0.1.0-py3-none-any.whl" }
-aap-training-contract = { url = "https://github.com/YOAO-Labs/YOAO-Plugins/releases/download/contracts-0a21bc402432/aap_training_contract-0.1.0-py3-none-any.whl" }
-torch = { index = "pytorch-cu132" }
-torchvision = { index = "pytorch-cu132" }
-
-[[tool.uv.index]]
-name = "pytorch-cu132"
-url = "https://download.pytorch.org/whl/cu132"
-explicit = true
+aap-inference-plugin-sdk = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/python-sdk-0.1.0/aap_inference_plugin_sdk-0.1.0-py3-none-any.whl" }
+aap-backend-runtime = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/python-sdk-0.1.0/aap_backend_runtime-0.1.0-py3-none-any.whl" }
+aap-inference-contract = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/contracts-3d6393e64630/aap_inference_contract-0.1.0-py3-none-any.whl" }
+aap-lifecycle-contract = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/contracts-3d6393e64630/aap_lifecycle_contract-0.1.0-py3-none-any.whl" }
+aap-protocol-v2 = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/contracts-3d6393e64630/aap_protocol_v2-0.2.0-py3-none-any.whl" }
+aap-task-contract = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/contracts-3d6393e64630/aap_task_contract-0.1.0-py3-none-any.whl" }
+aap-training-contract = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/contracts-3d6393e64630/aap_training_contract-0.1.0-py3-none-any.whl" }
 """,
         encoding="utf-8",
     )
-    (directory / "my_libreyolo_plugin.py").write_text(
-        '''"""Real LibreYOLO detector; adapt these three model responsibilities."""
+    (directory / "my_color_region_plugin.py").write_text(
+        '''"""CPU color-region algorithm example, not a pretrained model."""
 from __future__ import annotations
 
+import argparse
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from PIL.Image import Image
-from aap_inference_plugin import Detection, DetectionModel
-from aap_libreyolo_plugin import cli
-from aap_libreyolo_plugin.provider import Provider as LibreProvider
+from aap_inference_plugin import Detection, DetectionConfig, DetectionModel, create_detection_app
+import uvicorn
 
 
-class Model:
-    """Own one loaded native model; image boxes remain in original-image pixels."""
+class ColorRegionModel:
+    """One box enclosing all pixels with red >= 200 and green/blue <= 80."""
 
-    def __init__(self, native: DetectionModel) -> None:
-        self.native = native
-        self.classes = native.classes
+    classes = ("red-region",)
+
+    def __init__(self) -> None:
+        self.closed = False
 
     def predict(self, image: Image, parameters: Mapping[str, Any]) -> Sequence[Detection]:
-        return self.native.predict(image, parameters)
+        if self.closed:
+            raise RuntimeError("model is closed")
+        red, green, blue = image.convert("RGB").split()
+        mask = red.point(lambda value: 255 if value >= 200 else 0)
+        from PIL import ImageChops
+        mask = ImageChops.multiply(mask, green.point(lambda value: 255 if value <= 80 else 0))
+        mask = ImageChops.multiply(mask, blue.point(lambda value: 255 if value <= 80 else 0))
+        box = mask.getbbox()
+        return [Detection(*box, class_index=0, score=1.0)] if box else []
 
     def close(self) -> None:
-        self.native.close()
+        self.closed = True
 
 
 class Provider:
-    def __init__(self) -> None:
-        self.native = LibreProvider()
-
     def load(self, model_id: str, device: str, config: Mapping[str, Any]) -> DetectionModel:
-        return Model(self.native.load(model_id, device, config))
-
-    def execution_facts(self) -> Mapping[str, Any]:
-        return self.native.execution_facts()
+        if model_id != "red" or device != "cpu":
+            raise ValueError("color-region example supports only red on cpu")
+        return ColorRegionModel()
 
 
 def main() -> None:
-    cli.main(provider_factory=Provider)
+    parser = argparse.ArgumentParser(description="CPU color-region detection demo")
+    sub = parser.add_subparsers(dest="command", required=True)
+    serve = sub.add_parser("serve")
+    serve.add_argument("--token-file", type=Path, required=True)
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    token = args.token_file.read_text(encoding="utf-8").strip()
+    config = DetectionConfig(token=token, device="cpu", catalog={"red": {}},
+                             default_model="red", series="color-region")
+    uvicorn.run(create_detection_app(Provider(), config), host=args.host, port=args.port)
 ''',
         encoding="utf-8",
     )
 
 
-def dev_server(args) -> None:
-    """Warm a developer-only service; this is not managed GPU admission."""
-    token = args.token_file.read_text(encoding="utf-8").strip()
-    if len(token) < 32:
-        raise ValueError("token file must contain at least 32 characters")
-    if args.host != "127.0.0.1":
-        raise ValueError(
-            "developer preflight is loopback-only; use provider serve for managed deployment"
-        )
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", args.port))
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.entrypoint):
-        raise ValueError("--entrypoint must be the name of an installed console script")
-    executable = shutil.which(args.entrypoint)
-    if executable is None:
-        raise ValueError(
-            f"installed console script {args.entrypoint!r} was not found; install the generated project in this environment"
-        )
-    command = [
-        executable,
-        "serve",
-        "--device",
-        args.device,
-        "--asset-dir",
-        str(args.asset_dir),
-        "--token-file",
-        str(args.token_file),
-        "--host",
-        args.host,
-        "--port",
-        str(args.port),
-    ]
-    command.append("--local")
-    state = tempfile.TemporaryDirectory(prefix="aap-plugin-dev-")
-    process = None
-    try:
-        process = subprocess.Popen(
-            command,
-            env={
-                **os.environ,
-                "AAP_PLUGIN_DATA_DIR": os.environ.get(
-                    "AAP_PLUGIN_DATA_DIR", state.name
-                ),
-            },
-        )
-        url = f"http://127.0.0.1:{args.port}"
-        with httpx.Client(
-            base_url=url,
-            timeout=120,
-            trust_env=False,
-            headers={"Authorization": "Bearer " + token},
-        ) as client:
-            deadline = time.monotonic() + 60
-            while time.monotonic() < deadline:
-                if process.poll() is not None:
-                    raise ValueError(
-                        f"developer service exited before readiness (exit {process.returncode})"
-                    )
-                try:
-                    if client.get("/health", timeout=2).status_code == 200:
-                        break
-                except httpx.HTTPError:
-                    pass
-                time.sleep(0.1)
-            else:
-                raise ValueError("developer service did not become ready")
-            response = client.post(
-                "/warmup",
-                json={
-                    "task": "detect",
-                    "model_variants": {"series": "yolov9", "size": "t"},
-                },
-            )
-            response.raise_for_status()
-            health = client.get("/health")
-            health.raise_for_status()
-            info = health.json()
-            if (
-                info.get("compute", {}).get("effective_device") != args.device
-                or info.get("pool", {}).get("current_size", 0) < 1
-            ):
-                raise ValueError(
-                    "preflight did not establish a resident model on the requested device"
-                )
-            if (
-                args.device.startswith("cuda:")
-                and info.get("residency", {}).get("gpu_loaded") is not True
-            ):
-                raise ValueError(
-                    "preflight did not establish actual CUDA model residency"
-                )
-        print(
-            "Developer preflight loaded the model on the requested device; local mode is not managed GPU qualification",
-            flush=True,
-        )
-        code = process.wait()
-        if code:
-            raise ValueError(f"developer service exited with status {code}")
-    finally:
-        if process is not None and process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-        state.cleanup()
-
-
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="aap-plugin")
+    parser = argparse.ArgumentParser(prog="aap-inference-plugin")
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init")
     init.add_argument("directory", type=Path)
-    init.add_argument(
-        "--template", choices=["libreyolo-yolov9"], default="libreyolo-yolov9"
-    )
-    dev = commands.add_parser("dev")
-    dev.add_argument(
-        "--entrypoint",
-        default="my-libreyolo-plugin",
-        help="Installed generated project's console script",
-    )
-    dev.add_argument("--device", required=True)
-    dev.add_argument("--host", default="127.0.0.1")
-    dev.add_argument("--port", type=int, default=8000)
-    dev.add_argument("--asset-dir", type=Path, required=True)
-    dev.add_argument("--token-file", type=Path, required=True)
-    prepare = commands.add_parser("prepare-assets")
-    prepare.add_argument("--size", choices=["t", "s", "m", "c"], default="t")
-    prepare.add_argument("--asset-dir", type=Path, required=True)
     verify = commands.add_parser("check")
     mode = verify.add_mutually_exclusive_group(required=True)
     mode.add_argument("--url", help="Check a running HTTP endpoint only")
@@ -256,7 +128,6 @@ def main() -> None:
     verify.add_argument("--fixtures", required=True, type=Path)
     verify.add_argument(
         "--entrypoint",
-        default="my-libreyolo-plugin",
         help="Installed author console script for local qualification",
     )
     verify.add_argument("--device")
@@ -273,7 +144,7 @@ def main() -> None:
     build.add_argument("--requirements-lock", type=Path)
     build.add_argument(
         "--entrypoint",
-        help="Installed author console script; defaults to my-libreyolo-plugin",
+        help="Installed author console script (required for image builds)",
     )
     build.add_argument("--tag")
     build.add_argument("--push", action="store_true")
@@ -281,31 +152,18 @@ def main() -> None:
     try:
         if args.command == "init":
             init_project(args.directory)
-        elif args.command == "dev":
-            dev_server(args)
-        elif args.command == "prepare-assets":
-            subprocess.run(
-                [
-                    "aap-libreyolo",
-                    "prepare-assets",
-                    "--size",
-                    args.size,
-                    "--asset-dir",
-                    str(args.asset_dir),
-                ],
-                check=True,
-            )
         elif args.command == "check":
             if args.qualify_local:
                 if not (
-                    args.device
+                    args.entrypoint
+                    and args.device
                     and args.gpu_uuid
                     and args.asset_dir
                     and args.report
                     and args.exclusive_gpu
                 ):
                     raise ValueError(
-                        "--qualify-local requires --device, --gpu-uuid, --asset-dir, --exclusive-gpu and --report"
+                        "--qualify-local requires --entrypoint, --device, --gpu-uuid, --asset-dir, --exclusive-gpu and --report"
                     )
                 from .qualification import qualify_local
 
@@ -327,7 +185,7 @@ def main() -> None:
                     )
                 )
             else:
-                if args.device or args.gpu_uuid or args.asset_dir or args.exclusive_gpu:
+                if args.entrypoint or args.device or args.gpu_uuid or args.asset_dir or args.exclusive_gpu:
                     raise ValueError(
                         "GPU qualification options require --qualify-local"
                     )
@@ -349,9 +207,9 @@ def main() -> None:
                 args.tag,
             )
             if any(image_options) or args.entrypoint or args.push:
-                if not all(image_options):
+                if not all(image_options) or not args.entrypoint:
                     raise ValueError(
-                        "image build requires --base-image, --wheelhouse, --requirements-lock and --tag"
+                        "image build requires --entrypoint, --base-image, --wheelhouse, --requirements-lock and --tag"
                     )
                 from .image_build import build_image
 
@@ -359,7 +217,7 @@ def main() -> None:
                     base_image=args.base_image,
                     wheelhouse=args.wheelhouse,
                     requirements_lock=args.requirements_lock,
-                    entrypoint=args.entrypoint or "my-libreyolo-plugin",
+                    entrypoint=args.entrypoint,
                     tag=args.tag,
                     push=args.push,
                 )
@@ -373,7 +231,7 @@ def main() -> None:
                         f"{hashlib.sha256(artifact.read_bytes()).hexdigest()}  {artifact}"
                     )
     except (OSError, ValueError, httpx.HTTPError, subprocess.SubprocessError) as exc:
-        print(f"aap-plugin: {exc}", file=sys.stderr)
+        print(f"aap-inference-plugin: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
 

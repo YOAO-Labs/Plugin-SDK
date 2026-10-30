@@ -68,7 +68,8 @@ def build_image(*, base_image: str, wheelhouse: Path, requirements_lock: Path,
 FROM ${{BASE_IMAGE}}
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
-RUN --network=none --mount=type=bind,source=wheelhouse,target=/wheelhouse --mount=type=bind,source=requirements.lock,target=/requirements.lock python -m pip install --no-cache-dir --ignore-installed --no-index --find-links=/wheelhouse --only-binary=:all: --require-hashes -r /requirements.lock && python -c {json.dumps(check)} && groupadd -g 10001 plugin && useradd -u 10001 -g 10001 -M plugin && mkdir -p /var/lib/aap-libreyolo && chown 10001:10001 /var/lib/aap-libreyolo
+RUN --network=none --mount=type=bind,source=wheelhouse,target=/wheelhouse --mount=type=bind,source=requirements.lock,target=/requirements.lock python -m pip install --no-cache-dir --ignore-installed --no-index --find-links=/wheelhouse --only-binary=:all: --require-hashes -r /requirements.lock && python -c {json.dumps(check)} && groupadd -g 10001 plugin && useradd -u 10001 -g 10001 -M plugin && mkdir -p /var/lib/aap-inference && chown 10001:10001 /var/lib/aap-inference
+ENV AAP_PLUGIN_DATA_DIR=/var/lib/aap-inference
 USER 10001:10001
 EXPOSE 8000
 ENTRYPOINT {json.dumps(command)}
