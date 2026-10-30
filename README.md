@@ -14,7 +14,9 @@ Inference code is grouped under one capability directory, `packages/inference/`.
 
 ## Portable contracts and local development
 
-Python 3.11 or newer is needed for all three packages together. The platform is the authoritative contract source; its five portable wheels are mirrored for anonymous distribution in this SDK repository's immutable [`contracts-3d6393e64630` release](https://github.com/YOAO-Labs/Plugin-SDK/releases/tag/contracts-3d6393e64630). The fetcher pins the manifest SHA-256 `d3749d2a7429da60c02e222c65e9c4a5ec545b050b797422263d5a3bcb02ddec`, checks platform source revision `3d6393e64630fdeb6ff699b13c2d1f9e198a1a06`, and verifies every wheel against that manifest. It needs no platform checkout or GitHub credentials.
+Python 3.11 or newer is needed for all three packages together. The platform is the authoritative contract source; its five portable wheels are mirrored for anonymous distribution in this SDK repository's immutable [`contracts-c200b1f76441` release](https://github.com/YOAO-Labs/Plugin-SDK/releases/tag/contracts-c200b1f76441). The fetcher pins the manifest SHA-256 `46e0b750d75f7f53a2ae1adcefbda916bb294ad03ba8d15f987f95fca318b70c`, checks platform source revision `c200b1f764419bdd1683d64a556a727176a54917`, and verifies every wheel against that manifest. It needs no platform checkout or GitHub credentials.
+
+Managed checkpoint compatibility requires an explicit `format`: `null` identifies a native checkpoint without a separate export-format identity; named formats use nonempty strings. Null is not a wildcard, and omitting the field is invalid. The platform still matches the approved manifest, observed capabilities, checkpoint receipt and runtime device.
 
 ```sh
 python3 -m venv .venv

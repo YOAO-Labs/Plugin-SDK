@@ -6,9 +6,9 @@ import json
 from pathlib import Path
 from urllib.request import urlopen
 
-BASE = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/contracts-3d6393e64630/"
-MANIFEST_SHA256 = "d3749d2a7429da60c02e222c65e9c4a5ec545b050b797422263d5a3bcb02ddec"
-REVISION = "3d6393e64630fdeb6ff699b13c2d1f9e198a1a06"
+BASE = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/contracts-c200b1f76441/"
+MANIFEST_SHA256 = "46e0b750d75f7f53a2ae1adcefbda916bb294ad03ba8d15f987f95fca318b70c"
+REVISION = "c200b1f764419bdd1683d64a556a727176a54917"
 CONTRACTS = {"aap-inference-contract", "aap-lifecycle-contract", "aap-protocol-v2", "aap-task-contract", "aap-training-contract"}
 
 
