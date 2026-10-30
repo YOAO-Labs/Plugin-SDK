@@ -14,9 +14,11 @@ Inference code is grouped under one capability directory, `packages/inference/`.
 
 ## Portable contracts and local development
 
-Python 3.11 or newer is needed for all three packages together. The platform is the authoritative contract source; its five portable wheels are mirrored for anonymous distribution in this SDK repository's immutable [`contracts-c200b1f76441` release](https://github.com/YOAO-Labs/Plugin-SDK/releases/tag/contracts-c200b1f76441). The fetcher pins the manifest SHA-256 `46e0b750d75f7f53a2ae1adcefbda916bb294ad03ba8d15f987f95fca318b70c`, checks platform source revision `c200b1f764419bdd1683d64a556a727176a54917`, and verifies every wheel against that manifest. It needs no platform checkout or GitHub credentials.
+Python 3.11 or newer is needed for all three packages together. The platform is the authoritative contract source; its five portable wheels are mirrored for anonymous distribution in this SDK repository's immutable [`contracts-906628f2619b` release](https://github.com/YOAO-Labs/Plugin-SDK/releases/tag/contracts-906628f2619b). The fetcher pins the manifest SHA-256 `5c26a3829073324bf6f9cc29521457d296920424e5b1b3c34d672408aa956663`, checks platform source revision `906628f2619be01ec8dd96f03385218e3626b64c`, and verifies every wheel against that manifest. It needs no platform checkout or GitHub credentials.
 
 Managed checkpoint compatibility requires an explicit `format`: `null` identifies a native checkpoint without a separate export-format identity; named formats use nonempty strings. Null is not a wildcard, and omitting the field is invalid. The platform still matches the approved manifest, observed capabilities, checkpoint receipt and runtime device.
+
+Plugins describe the required assets for each model and complete variant. The platform independently verifies files in the installed container and governs installation-scoped approval, availability and project access. Publishing a descriptor or displaying a catalog entry grants none of those permissions; user-trained checkpoints remain under platform Learning and Assets governance.
 
 Native Torch lifecycle reports describe their model pools without an empty `session_counts` field. ONNX Runtime plugins additionally record the actual per-pool session counts and CUDA provider observations; the runtime checks those against the complete report rather than treating a missing session as qualified.
 
