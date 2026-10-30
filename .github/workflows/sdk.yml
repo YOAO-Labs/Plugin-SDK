@@ -15,7 +15,7 @@ jobs:
           python-version: '3.11'
       - name: Build and install committed artifacts
         run: |
-          python -m pip install build setuptools wheel pytest
+          python -m pip install build 'setuptools>=68' wheel pytest
           python scripts/fetch-contracts.py "$RUNNER_TEMP/contracts"
           python scripts/build-sdk-artifacts.py --revision "$GITHUB_SHA" --output "$RUNNER_TEMP/sdk"
           python -m pip install "$RUNNER_TEMP"/contracts/*.whl "$RUNNER_TEMP"/sdk/aap_backend_runtime-*.whl
@@ -32,7 +32,7 @@ jobs:
           python-version: '3.11'
       - name: Build and install committed artifacts
         run: |
-          python -m pip install build setuptools wheel pytest pytest-asyncio
+          python -m pip install build 'setuptools>=68' wheel pytest pytest-asyncio
           python scripts/fetch-contracts.py "$RUNNER_TEMP/contracts"
           python scripts/build-sdk-artifacts.py --revision "$GITHUB_SHA" --output "$RUNNER_TEMP/sdk"
           python -m pip install "$RUNNER_TEMP"/contracts/*.whl "$RUNNER_TEMP"/sdk/aap_backend_runtime-*.whl "$RUNNER_TEMP"/sdk/aap_inference_plugin_sdk-*.whl
@@ -50,7 +50,7 @@ jobs:
           python-version: '3.11'
       - name: Build and install committed artifacts
         run: |
-          python -m pip install build setuptools wheel pytest
+          python -m pip install build 'setuptools>=68' wheel pytest
           python scripts/build-sdk-artifacts.py --revision "$GITHUB_SHA" --output "$RUNNER_TEMP/sdk"
           python -m pip install "$RUNNER_TEMP"/sdk/anno_mask_utils-*.whl
       - name: Exercise mask utilities

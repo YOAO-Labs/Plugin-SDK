@@ -17,7 +17,7 @@ Python 3.11 or newer is needed for all three packages together. The platform is 
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install build setuptools wheel pytest pytest-asyncio
+python -m pip install build 'setuptools>=68' wheel pytest pytest-asyncio
 python scripts/fetch-contracts.py /tmp/aap-contracts
 python -m pip install /tmp/aap-contracts/*.whl
 python -m pip install -e packages/inference-runtime -e packages/inference-sdk -e packages/inference-mask-utils
@@ -31,7 +31,7 @@ For author commands and their arguments, use `aap-inference-plugin --help`, `aap
 The initial SDK extraction is SDK commit `182d20dd0d84abe864d44fdb29d89dcf8de375a2`, extracted from the shared packages in YOAO-Plugins; its own repository history is the provenance for subsequent SDK changes. Platform portable contracts have a separate provenance above. Build only from an explicit SDK commit; uncommitted working-tree changes are not included:
 
 ```sh
-python -m pip install build setuptools wheel
+python -m pip install build 'setuptools>=68' wheel
 python scripts/build-sdk-artifacts.py --revision HEAD --output /tmp/aap-sdk-release
 (cd /tmp/aap-sdk-release && sha256sum -c SHA256SUMS)
 ```
