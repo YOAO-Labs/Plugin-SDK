@@ -41,6 +41,14 @@ python -m pytest packages/inference/mask-utils/tests
 
 For author commands and their arguments, use `aap-inference-plugin --help`, `aap-inference-plugin build --help`, and `aap-inference-plugin check --help`. `aap-inference-plugin build /path/to/your-plugin` builds a wheel. HTTP checks require a running service and fixture data; GPU qualification requires explicit exclusive hardware and evidence. Neither a successful wheel build nor an HTTP check grants platform-managed qualification or permission to redistribute models. See the inference SDK package documentation for author workflow and provider requirements.
 
+## Stateful tracker sessions
+
+`TrackerSessionManager` keeps idle tracker state owned by the exact `ManagedLruPool` entry. Its `start()` borrow factory must yield `(managed_lease, callback_resource)`: the first value is the actual `ResourceLease` returned by that pool, while the second is the resource or adapter passed to `open_session`, `call` and `close_session` callbacks. Do not replace the first value with a model-only wrapper.
+
+Opening and each command borrow and serialize the entry only while work runs. A completed command leaves no active borrower, but its idle session remains pool-owned. Continuations reacquire that same entry without rebuilding by key. Eviction, idle unload, drain or shutdown invalidate its context and await state cleanup before disposing the model; a stale token raises `TrackerSessionLost`, including after the same model key is loaded again.
+
+Close callbacks must release their real state and surface failures. Cleanup runs exactly once; a raised error or the resource's `cleanup_uncertain` flag retains owned roots and unknown residency instead of claiming a safe unload. Cancellation waits for already-owned work to settle. Fence new admission before shutting down the session manager, and keep each workload's signed admission and completion outside the pool adapter: a persistent context does not authorize another request or make a consumed grant reusable.
+
 ## Building source release inputs
 
 The initial SDK extraction is SDK commit `182d20dd0d84abe864d44fdb29d89dcf8de375a2`, extracted from the shared packages in YOAO-Plugins; its own repository history is the provenance for subsequent SDK changes. Platform portable contracts have a separate provenance above. Build only from an explicit SDK commit; uncommitted working-tree changes are not included:

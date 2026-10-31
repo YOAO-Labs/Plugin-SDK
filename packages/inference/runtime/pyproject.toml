@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aap-backend-runtime"
 version = "0.1.0"
-description = "ML backend 运行时共享无状态叶子函数 (图片下载 / 显存释放 / /versions 载荷 / GPU 快照), 被 yolo / sam3 / grounded-sam2 / onnxtools / rapidocr 等 backend 复用"
+description = "推理插件共享运行时：输入读取、取消安全模型池、有状态追踪与受控 GPU 生命周期"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 # torch 故意不在此声明: 各 backend 的 torch / torchvision 由 docker base image 锁定 (见各
