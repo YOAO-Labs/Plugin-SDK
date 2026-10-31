@@ -47,6 +47,8 @@ For author commands and their arguments, use `aap-inference-plugin --help`, `aap
 
 Opening and each command borrow and serialize the entry only while work runs. A completed command leaves no active borrower, but its idle session remains pool-owned. Continuations reacquire that same entry without rebuilding by key. Eviction, idle unload, drain or shutdown invalidate its context and await state cleanup before disposing the model; a stale token raises `TrackerSessionLost`, including after the same model key is loaded again.
 
+Retirement releases model references before the allocator cleanup callback runs. A completed cleanup must release both live model allocations and allocator caches; an empty pool alone is not physical-memory evidence.
+
 Close callbacks must release their real state and surface failures. Cleanup runs exactly once; a raised error or the resource's `cleanup_uncertain` flag retains owned roots and unknown residency instead of claiming a safe unload. Cancellation waits for already-owned work to settle. Fence new admission before shutting down the session manager, and keep each workload's signed admission and completion outside the pool adapter: a persistent context does not authorize another request or make a consumed grant reusable.
 
 ## Building source release inputs

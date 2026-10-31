@@ -650,6 +650,8 @@ class ManagedLruPool(Generic[KeyT, ResourceT]):
             for artifact in artifacts:
                 self._retiring_artifacts[id(artifact)] = artifact
                 artifact._invalidate_owned_states()
+            if artifacts:
+                del artifact
             self._entries.clear()
             self._cleanup_quarantine.clear()
             self._cleanup_in_progress = True

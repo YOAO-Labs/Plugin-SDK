@@ -154,6 +154,27 @@ def test_prestart_builder_cancel_still_cleans_evicted_root() -> None:
     _run(scenario())
 
 
+def test_unload_releases_model_roots_before_allocator_cleanup() -> None:
+    async def scenario() -> None:
+        resource_refs: list[weakref.ReferenceType[_Resource]] = []
+
+        def build(key: str) -> BuildArtifact[_Resource]:
+            resource = _Resource(key)
+            resource_refs.append(weakref.ref(resource))
+            return BuildArtifact(resource)
+
+        def strict_cleanup() -> None:
+            assert all(reference() is None for reference in resource_refs)
+
+        pool = ManagedLruPool(2, build, str, strict_cleanup)
+        await pool.warmup("first")
+        await pool.warmup("last")
+        await pool.unload_all(reason="manual", force_cleanup=True)
+        await pool.shutdown()
+
+    _run(scenario())
+
+
 def test_failed_attachment_cleanup_keeps_root_for_force_retry() -> None:
     async def scenario() -> None:
         attempts = 0
