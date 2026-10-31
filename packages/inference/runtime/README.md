@@ -1,12 +1,12 @@
 # aap-backend-runtime
 
-ML backend 运行时共享组件 (无状态叶子函数 + 取消安全的 LRU 池内核)。单一来源, 避免跨 backend 复制漂移。
+ML backend 运行时共享组件（无状态叶子函数、取消安全的 LRU 池与会话所有权内核）。单一来源，避免跨 backend 复制漂移。
 
 由平台 backend 通过固定的公开 Python 制品复用；契约包仍由平台拥有。
 
 ## 边界
 
-**包含**（同契约、零 per-backend 状态的叶子函数）:
+**包含**（共享契约与实例级所有权，不持有模型专属全局状态）:
 
 - `fetch_image(file_path, *, timeout=10.0) -> PIL.Image` — 统一 `data:` base64 /
   `http(s)://` presigned URL / 本地绝对路径三种来源, 解码为 RGB `PIL.Image`。
@@ -35,6 +35,14 @@ ML backend 运行时共享组件 (无状态叶子函数 + 取消安全的 LRU �
   保持日志身份与 backend 一致 (如 `grounded-sam2-backend.managed-pool`)。
   之前 `grounded-sam2-backend/managed_pool.py` 与 `sam3-backend/managed_pool.py` 仅差
   docstring 与 logger 名, 现由本包统一提供。
+- `TrackerSessionManager` — 以不透明 token 和调用方 binding 保留跨窗 session 的
+  实际资源借用。取消 `start` 时，等待 opener 完成并关闭已创建的状态；取消排队或
+  运行中的 `call` 时，等待真实命令结束后再向调用方传播取消。失败 session 中尚未
+  执行的命令以 `TrackerSessionLost` 结束，不遗留永远等待的调用者。
+  `close` 的调用者断开不会丢失正在清理的 owner；`expire`／`shutdown` 等待全部
+  选中 owner 后传播清理错误，即使 session 已从索引移除也保留失败，不能在重试中
+  将其当作可信空状态。`shutdown` 前的准入栅栏及已接纳请求的等待由调用方负责；
+  本组件不替代平台或插件生命周期的授权、退役与物理停止证明。
 - `gpu_lifecycle.ManagedGpuLifecycle(pool, *, verify_keyring, evictable_verified=False,
 boot_id=None, expected_registry_id=None, expected_gpu_resource_id=None,
 terminal_cpu_enabled=False, allow_legacy_workloads=True)` — 签名控制、generation、JTI、
