@@ -22,7 +22,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0"]
+qualification = ["PyJWT>=2.8,<3", "uvicorn>=0.29"]
+test = ["pytest>=8.0", "pytest-asyncio>=0.24", "PyJWT>=2.8,<3", "uvicorn>=0.29"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

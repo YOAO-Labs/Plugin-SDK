@@ -61,6 +61,11 @@ terminal_cpu_enabled=False, allow_legacy_workloads=True)` — 签名控制、gen
   注入框架专属校验。下载不跟随重定向。
 - `backend_auth.require_external_bearer(request, expected_token)` — 外部实例独立
   Bearer token 校验，不赋予任何第一方 provider 身份。
+- `qualification_http.http_client(app)` / `bind_operator_routes(client, *, registry_id,
+  route_secret)` — 独立资格进程的真实 loopback HTTP 客户端及临时路由绑定；调用方管理
+  app lifespan，并通过本地 token 文件配置独立实例。使用本包的 `qualification` extra，
+  不要求安装 Python 3.11 的 author SDK。仅用于专用验收进程，不操作已有生产实例；
+  建立真实 HTTP 路由不等于模型、GPU 或完整生命周期已获资格。
 
 **不包含**:
 

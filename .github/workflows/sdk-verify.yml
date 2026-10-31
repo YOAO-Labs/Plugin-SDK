@@ -19,7 +19,10 @@ jobs:
           python -m pip install build 'setuptools>=68' wheel pytest
           python scripts/fetch-contracts.py "$RUNNER_TEMP/contracts"
           python scripts/build-sdk-artifacts.py --revision "$GITHUB_SHA" --output "$RUNNER_TEMP/sdk"
-          python -m pip install "$RUNNER_TEMP"/contracts/*.whl "$RUNNER_TEMP"/sdk/aap_backend_runtime-*.whl
+          python -m pip install "$RUNNER_TEMP"/contracts/*.whl
+          for artifact in "$RUNNER_TEMP"/sdk/aap_backend_runtime-*.whl; do
+            python -m pip install "$artifact[test]"
+          done
       - name: Exercise runtime
         run: |
           python -c 'from aap_backend_runtime import versions_payload; assert versions_payload("model", "backend") == {"versions": ["model"], "backend_version": "backend"}'

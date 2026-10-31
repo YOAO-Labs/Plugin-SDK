@@ -22,13 +22,18 @@ Plugins describe the required assets for each model and complete variant. The pl
 
 Native Torch lifecycle reports describe their model pools without an empty `session_counts` field. ONNX Runtime plugins additionally record the actual per-pool session counts and CUDA provider observations; the runtime checks those against the complete report rather than treating a missing session as qualified.
 
+Full HTTP implementations can reuse `aap_backend_runtime.qualification_http` with the runtime's
+`qualification` extra for real loopback route-admission checks. The caller owns the dedicated app
+lifespan, credentials and actual model/lifecycle scenarios; the helper does not qualify an artifact
+or authorize access to a live platform. It supports Python 3.10 without the author SDK.
+
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install build 'setuptools>=68' wheel pytest pytest-asyncio
 python scripts/fetch-contracts.py /tmp/aap-contracts
 python -m pip install /tmp/aap-contracts/*.whl
-python -m pip install -e packages/inference/runtime -e packages/inference/sdk -e packages/inference/mask-utils
+python -m pip install -e 'packages/inference/runtime[test]' -e packages/inference/sdk -e packages/inference/mask-utils
 python -m pytest packages/inference/runtime/tests
 python -m pytest packages/inference/sdk/tests
 python -m pytest packages/inference/mask-utils/tests
