@@ -1,279 +1,329 @@
 import asyncio
+import gc
+import threading
+import time
+import weakref
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
 import pytest
 
-from aap_backend_runtime import TrackerSessionLost, TrackerSessionManager
+from aap_backend_runtime import (
+    BuildArtifact,
+    ManagedLruPool,
+    ManagedPoolBusyError,
+    TrackerSessionLost,
+    TrackerSessionManager,
+)
 
 
-def test_tracker_session_holds_resource_and_checks_binding() -> None:
-    async def run() -> None:
-        events: list[str] = []
-
-        @asynccontextmanager
-        async def borrow():
-            events.append("borrow")
-            try:
-                yield "resource"
-            finally:
-                events.append("release")
-
-        manager = TrackerSessionManager[str, dict]()
-        token = await manager.start(
-            binding=("job-1", "forward"),
-            borrow=borrow,
-            open_session=lambda resource: _value({"resource": resource, "count": 0}),
-            close_session=lambda _resource, state: _event(
-                events, f"close:{state['count']}"
-            ),
-        )
-        assert (
-            await manager.call(
-                token,
-                ("job-1", "forward"),
-                _increment,
-            )
-            == 1
-        )
-        with pytest.raises(TrackerSessionLost):
-            await manager.call(token, ("job-2", "forward"), _increment)
-        await manager.close(token, ("job-1", "forward"))
-        assert events == ["borrow", "close:1", "release"]
-
-    asyncio.run(run())
+@dataclass
+class Resource:
+    key: str
+    device: str = "cpu"
+    cleanup_uncertain: bool = False
 
 
-def test_tracker_session_expires_and_shutdown_releases_resources() -> None:
-    async def run() -> None:
-        events: list[str] = []
+def make_pool(events):
+    def build(key):
+        events.append(("build", key))
+        return BuildArtifact(Resource(key))
 
-        @asynccontextmanager
-        async def borrow():
-            try:
-                yield "resource"
-            finally:
-                events.append("release")
-
-        manager = TrackerSessionManager[str, dict](ttl_seconds=0)
-        token = await manager.start(
-            binding=("job-1", "forward"),
-            borrow=borrow,
-            open_session=lambda _resource: _value({}),
-            close_session=lambda _resource, _state: _event(events, "close"),
-        )
-        assert await manager.expire() == 1
-        assert events == ["close", "release"]
-        with pytest.raises(TrackerSessionLost):
-            await manager.close(token, ("job-1", "forward"))
-
-        await manager.start(
-            binding=("job-2", "forward"),
-            borrow=borrow,
-            open_session=lambda _resource: _value({}),
-            close_session=lambda _resource, _state: _event(events, "close"),
-        )
-        await manager.shutdown()
-        assert events == ["close", "release", "close", "release"]
-
-    asyncio.run(run())
+    return ManagedLruPool(1, build, str, lambda: events.append(("dispose",)))
 
 
-def test_tracker_session_does_not_expire_during_command() -> None:
-    async def run() -> None:
-        started = asyncio.Event()
-        release = asyncio.Event()
-
-        @asynccontextmanager
-        async def borrow():
-            yield "resource"
-
-        async def slow_command(_resource, _state):
-            started.set()
-            await release.wait()
-            return "done"
-
-        manager = TrackerSessionManager[str, dict](ttl_seconds=0)
-        token = await manager.start(
-            binding=("job-1", "forward"),
-            borrow=borrow,
-            open_session=lambda _resource: _value({}),
-            close_session=lambda _resource, _state: _value(None),
-        )
-        pending = asyncio.create_task(
-            manager.call(token, ("job-1", "forward"), slow_command)
-        )
-        await started.wait()
-
-        assert await manager.expire() == 0
-        release.set()
-        assert await pending == "done"
-        assert await manager.expire() == 1
-
-    asyncio.run(run())
+def borrow(pool, key):
+    @asynccontextmanager
+    async def context():
+        async with pool.borrow(key) as lease:
+            yield lease, lease.resource
+    return context
 
 
-def test_loop_shutdown_settles_start_before_owner_first_runs() -> None:
-    async def run() -> None:
+async def open_state(resource):
+    return {"key": resource.key, "count": 0}
+
+
+async def increment(resource, state):
+    assert resource.key == state["key"]
+    state["count"] += 1
+    return state["count"]
+
+
+def test_dispatches_release_borrower_and_close_once():
+    async def run():
         events = []
+        pool = make_pool(events)
         manager = TrackerSessionManager()
-        parent = asyncio.current_task()
-        starting = asyncio.create_task(manager.start(
-            binding=("job",), borrow=lambda: _borrow(events, "resource"),
-            open_session=lambda _resource: _value({}),
-            close_session=lambda _resource, _state: _event(events, "closed"),
-        ))
 
-        def cancel_children():
-            for task in asyncio.all_tasks():
-                if task is not parent:
-                    task.cancel()
+        async def close(resource, state):
+            events.append(("close", resource.key, state["count"]))
 
-        asyncio.get_running_loop().call_soon(cancel_children)
-        with pytest.raises(asyncio.CancelledError):
-            await starting
-        await manager.shutdown()
-        assert events == []
+        token = await manager.start(binding=("job",), borrow=borrow(pool, "model"),
+                                    open_session=open_state, close_session=close)
+        assert (await pool.snapshot())["borrowers"] == 0
+        assert await manager.call(token, ("job",), increment) == 1
+        assert (await pool.snapshot())["borrowers"] == 0
+        assert await manager.call(token, ("job",), increment) == 2
+        with pytest.raises(TrackerSessionLost):
+            await manager.call(token, ("other",), increment)
+        await manager.close(token, ("job",))
+        assert (await pool.snapshot())["borrowers"] == 0
+        with pytest.raises(TrackerSessionLost):
+            await manager.close(token, ("job",))
+        await pool.shutdown()
+        assert events.count(("close", "model", 2)) == 1
+        assert events.index(("close", "model", 2)) < events.index(("dispose",))
 
     asyncio.run(run())
 
 
-def test_cancelled_start_waits_for_opened_owner_cleanup() -> None:
-    async def run() -> None:
+@pytest.mark.parametrize("retire", ["lru", "idle", "drain", "shutdown"])
+def test_pool_retirement_invalidates_and_cleans_before_disposal(retire):
+    async def run():
         events = []
+        pool = make_pool(events)
+        manager = TrackerSessionManager()
+        cleaning, gate = asyncio.Event(), asyncio.Event()
+
+        async def close(resource, state):
+            cleaning.set()
+            await gate.wait()
+            events.append(("close", resource.key, state["count"]))
+
+        token = await manager.start(binding=("job",), borrow=borrow(pool, "model"),
+                                    open_session=open_state, close_session=close)
+        if retire == "lru":
+            retirement = asyncio.create_task(pool.warmup("other"))
+        elif retire == "idle":
+            retirement = asyncio.create_task(pool.unload_idle(idle_before=time.monotonic() + 1))
+        elif retire == "drain":
+            retirement = asyncio.create_task(pool.unload_all(reason="drain"))
+        else:
+            retirement = asyncio.create_task(pool.shutdown())
+        await cleaning.wait()
+        with pytest.raises(TrackerSessionLost):
+            await manager.call(token, ("job",), increment)
+        assert not retirement.done()
+        assert ("dispose",) not in events
+        gate.set()
+        await retirement
+        assert events.count(("close", "model", 0)) == 1
+        assert events.index(("close", "model", 0)) < events.index(("dispose",))
+        if retire == "lru":
+            await pool.warmup("model")
+            with pytest.raises(TrackerSessionLost):
+                await manager.call(token, ("job",), increment)
+            assert events.count(("build", "model")) == 2
+        await manager.shutdown()
+        await pool.shutdown()
+
+    asyncio.run(asyncio.wait_for(run(), 10))
+
+
+def test_cancelled_command_waits_for_work_and_release():
+    async def run():
+        events = []
+        pool = make_pool(events)
+        manager = TrackerSessionManager(ttl_seconds=0)
+        started, gate = asyncio.Event(), asyncio.Event()
+
+        async def close(resource, state):
+            events.append(("close", resource.key, state["count"]))
+
+        async def slow(resource, state):
+            started.set()
+            await gate.wait()
+            return await increment(resource, state)
+
+        token = await manager.start(binding=("job",), borrow=borrow(pool, "model"),
+                                    open_session=open_state, close_session=close)
+        call = asyncio.create_task(manager.call(token, ("job",), slow))
+        await started.wait()
+        call.cancel()
+        await asyncio.sleep(0)
+        assert not call.done()
+        assert (await pool.snapshot())["borrowers"] == 1
+        assert await manager.expire() == 0
+        with pytest.raises(ManagedPoolBusyError):
+            await pool.unload_all(reason="drain")
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+        assert (await pool.snapshot())["borrowers"] == 0
+        assert await manager.expire() == 1
+        assert events.count(("close", "model", 1)) == 1
+        await pool.shutdown()
+
+    asyncio.run(asyncio.wait_for(run(), 10))
+
+
+def test_cancelled_start_waits_for_open_and_cleanup():
+    async def run():
+        events = []
+        pool = make_pool(events)
+        manager = TrackerSessionManager()
         opening, open_gate = asyncio.Event(), asyncio.Event()
         closing, close_gate = asyncio.Event(), asyncio.Event()
-        manager = TrackerSessionManager(ttl_seconds=0)
 
-        async def open_session(_resource):
+        async def opening_session(resource):
             opening.set()
             await open_gate.wait()
-            events.append("opened")
-            return {}
+            return await open_state(resource)
 
-        async def close_session(_resource, _state):
+        async def close(resource, state):
             closing.set()
             await close_gate.wait()
-            events.append("closed")
+            events.append(("close", resource.key, state["count"]))
 
-        start = asyncio.create_task(manager.start(
-            binding=("job",), borrow=lambda: _borrow(events, "resource"),
-            open_session=open_session, close_session=close_session,
-        ))
+        start = asyncio.create_task(manager.start(binding=("job",), borrow=borrow(pool, "model"),
+                            open_session=opening_session, close_session=close))
         await opening.wait()
         start.cancel()
-        await asyncio.sleep(0)
-        assert not start.done()
-        assert await manager.expire() == 0
         open_gate.set()
         await closing.wait()
-        start.cancel()
-        await asyncio.sleep(0)
         assert not start.done()
-        assert events == ["borrow:resource", "opened"]
         close_gate.set()
         with pytest.raises(asyncio.CancelledError):
             await start
-        assert events == ["borrow:resource", "opened", "closed", "release:resource"]
+        assert (await pool.snapshot())["borrowers"] == 0
+        assert events.count(("close", "model", 0)) == 1
         await manager.shutdown()
+        await pool.shutdown()
 
     asyncio.run(asyncio.wait_for(run(), 10))
 
 
-@pytest.mark.parametrize("phase", ["queued", "running"])
-def test_cancelled_call_keeps_its_execution_owned(phase) -> None:
-    async def run() -> None:
+@pytest.mark.parametrize("failure", ["raise", "uncertain"])
+@pytest.mark.parametrize("retire", ["close", "lru", "drain"])
+def test_cleanup_failure_never_reports_unloaded(failure, retire):
+    async def run():
         events = []
-        first_started, first_gate = asyncio.Event(), asyncio.Event()
-        second_started, second_gate = asyncio.Event(), asyncio.Event()
-        caller_started = asyncio.Event()
-        manager = TrackerSessionManager(ttl_seconds=0)
-        token = await manager.start(
-            binding=("job",), borrow=lambda: _borrow(events, "resource"),
-            open_session=lambda _resource: _value({}),
-            close_session=lambda _resource, _state: _event(events, "closed"),
-        )
+        pool = make_pool(events)
+        manager = TrackerSessionManager()
+        attempts = 0
 
-        async def first_command(_resource, _state):
-            first_started.set()
-            await first_gate.wait()
-            return "first"
+        async def close(resource, state):
+            nonlocal attempts
+            attempts += 1
+            if failure == "raise":
+                raise RuntimeError("reset failed")
+            resource.cleanup_uncertain = True
 
-        async def second_command(_resource, _state):
-            second_started.set()
-            await second_gate.wait()
-            events.append("execution_finished")
-            return "second"
-
-        async def second_call():
-            caller_started.set()
-            return await manager.call(token, ("job",), second_command)
-
-        first = None
-        if phase == "queued":
-            first = asyncio.create_task(manager.call(token, ("job",), first_command))
-            await first_started.wait()
-        second = asyncio.create_task(second_call())
-        await caller_started.wait()
-        if phase == "running":
-            await second_started.wait()
-        second.cancel()
-        await asyncio.sleep(0)
-        assert not second.done()
-        assert await manager.expire() == 0
-        if first is not None:
-            first_gate.set()
-            assert await first == "first"
-        await second_started.wait()
-        assert not second.done()
-        second_gate.set()
-        with pytest.raises(asyncio.CancelledError):
-            await second
-        events.append("caller_cancelled")
-        await manager.close(token, ("job",))
-        assert events == [
-            "borrow:resource", "execution_finished", "caller_cancelled",
-            "closed", "release:resource",
-        ]
+        token = await manager.start(binding=("job",), borrow=borrow(pool, "model"),
+                                    open_session=open_state, close_session=close)
+        with pytest.raises(RuntimeError):
+            if retire == "close":
+                await manager.close(token, ("job",))
+            elif retire == "lru":
+                await pool.warmup("other")
+            else:
+                await pool.unload_all(reason="drain")
+        # Wait for a failed LRU builder's bookkeeping before examining its status.
+        while (await pool.snapshot())["builders"]:
+            await asyncio.sleep(0)
+        snapshot = await pool.snapshot()
+        assert snapshot["cleanup_failed"] is True
+        assert snapshot["gpu_resident"] is not False
+        with pytest.raises(RuntimeError):
+            await pool.unload_all(reason="drain", force_cleanup=True)
+        assert attempts == 1
+        assert ("dispose",) not in events
 
     asyncio.run(asyncio.wait_for(run(), 10))
 
 
-def test_failed_command_settles_queued_call_after_cleanup() -> None:
-    async def run() -> None:
+def test_prestart_cancelled_builder_retires_owned_state():
+    async def run():
         events = []
-        first_started, first_gate = asyncio.Event(), asyncio.Event()
-        caller_started = asyncio.Event()
-        closing, close_gate = asyncio.Event(), asyncio.Event()
+        pool = make_pool(events)
         manager = TrackerSessionManager()
 
-        async def close_session(_resource, _state):
+        async def close(resource, state):
+            events.append(("close", resource.key, state["count"]))
+
+        token = await manager.start(binding=("job",), borrow=borrow(pool, "model"),
+                                    open_session=open_state, close_session=close)
+        async with pool._lock:
+            builder = pool._get_or_start_builder_locked("other")
+            builder.cancel()
+        while (await pool.snapshot())["builders"]:
+            await asyncio.sleep(0)
+        with pytest.raises(TrackerSessionLost):
+            await manager.call(token, ("job",), increment)
+        assert events.count(("close", "model", 0)) == 1
+        assert events.index(("close", "model", 0)) < events.index(("dispose",))
+        await manager.shutdown()
+        await pool.shutdown()
+
+    asyncio.run(asyncio.wait_for(run(), 10))
+
+
+def test_cancelled_thread_work_settles_before_release():
+    async def run():
+        events = []
+        pool = make_pool(events)
+        manager = TrackerSessionManager()
+        entered = asyncio.Event()
+        gate = threading.Event()
+        loop = asyncio.get_running_loop()
+
+        async def close(resource, state):
+            events.append(("close", resource.key, state["count"]))
+
+        def work():
+            loop.call_soon_threadsafe(entered.set)
+            if not gate.wait(5):
+                raise TimeoutError("worker was not released")
+            return 42
+
+        async def command(_resource, _state):
+            return await asyncio.to_thread(work)
+
+        token = await manager.start(binding=("job",), borrow=borrow(pool, "model"),
+                                    open_session=open_state, close_session=close)
+        call = asyncio.create_task(manager.call(token, ("job",), command))
+        await entered.wait()
+        call.cancel()
+        await asyncio.sleep(0)
+        assert not call.done()
+        assert (await pool.snapshot())["borrowers"] == 1
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+        assert (await pool.snapshot())["borrowers"] == 0
+        await manager.close(token, ("job",))
+        await pool.shutdown()
+
+    asyncio.run(asyncio.wait_for(run(), 10))
+
+
+def test_failed_command_invalidates_queued_call_after_cleanup():
+    async def run():
+        events = []
+        pool = make_pool(events)
+        manager = TrackerSessionManager()
+        entered, gate = asyncio.Event(), asyncio.Event()
+        closing, close_gate = asyncio.Event(), asyncio.Event()
+
+        async def close(resource, state):
             closing.set()
             await close_gate.wait()
-            events.append("closed")
-
-        token = await manager.start(
-            binding=("job",), borrow=lambda: _borrow(events, "resource"),
-            open_session=lambda _resource: _value({}), close_session=close_session,
-        )
+            events.append(("close", resource.key, state["count"]))
 
         async def fail(_resource, _state):
-            first_started.set()
-            await first_gate.wait()
+            entered.set()
+            await gate.wait()
             raise ValueError("inference failed")
 
-        async def queued_call():
-            caller_started.set()
-            return await manager.call(
-                token, ("job",),
-                lambda _resource, _state: _event(events, "unexpected_execution"),
-            )
-
+        token = await manager.start(binding=("job",), borrow=borrow(pool, "model"),
+                                    open_session=open_state, close_session=close)
         first = asyncio.create_task(manager.call(token, ("job",), fail))
-        await first_started.wait()
-        second = asyncio.create_task(queued_call())
-        await caller_started.wait()
-        first_gate.set()
-        with pytest.raises(ValueError):
+        await entered.wait()
+        second = asyncio.create_task(manager.call(token, ("job",), increment))
+        await asyncio.sleep(0)
+        gate.set()
+        with pytest.raises(ValueError, match="inference failed"):
             await first
         await closing.wait()
         assert not second.done()
@@ -281,129 +331,130 @@ def test_failed_command_settles_queued_call_after_cleanup() -> None:
         with pytest.raises(TrackerSessionLost):
             await second
         await manager.shutdown()
-        assert events == ["borrow:resource", "closed", "release:resource"]
+        await pool.shutdown()
+        assert events.count(("close", "model", 0)) == 1
 
     asyncio.run(asyncio.wait_for(run(), 10))
 
 
-@pytest.mark.parametrize("retire", ["close", "expire", "shutdown"])
-def test_cleanup_failure_survives_retirement_and_waits_other_owners(retire) -> None:
-    async def run() -> None:
+def test_cancelled_close_remains_owned_by_shutdown():
+    async def run():
         events = []
-        second_closing, second_gate = asyncio.Event(), asyncio.Event()
-        failure = RuntimeError("session cleanup failed")
-        manager = TrackerSessionManager(ttl_seconds=0)
-
-        async def close_session(resource, _state):
-            if resource == "first":
-                events.append("failed_close")
-                raise failure
-            second_closing.set()
-            await second_gate.wait()
-            events.append("second_closed")
-
-        first = await manager.start(
-            binding=("first",), borrow=lambda: _borrow(events, "first"),
-            open_session=lambda _resource: _value({}), close_session=close_session,
-        )
-        await manager.start(
-            binding=("second",), borrow=lambda: _borrow(events, "second"),
-            open_session=lambda _resource: _value({}), close_session=close_session,
-        )
-        if retire == "close":
-            with pytest.raises(RuntimeError) as closed:
-                await manager.close(first, ("first",))
-            assert closed.value is failure
-            pending = asyncio.create_task(manager.shutdown())
-        else:
-            pending = asyncio.create_task(getattr(manager, retire)())
-        await second_closing.wait()
-        assert not pending.done()
-        second_gate.set()
-        with pytest.raises(RuntimeError) as retired:
-            await pending
-        assert retired.value is failure
-        assert events == [
-            "borrow:first", "borrow:second", "failed_close", "release:first",
-            "second_closed", "release:second",
-        ]
-        with pytest.raises(RuntimeError) as repeated:
-            await manager.shutdown()
-        assert repeated.value is failure
-
-    asyncio.run(asyncio.wait_for(run(), 10))
-
-
-def test_cancelled_close_remains_visible_to_shutdown() -> None:
-    async def run() -> None:
-        events = []
-        closing, close_gate = asyncio.Event(), asyncio.Event()
+        pool = make_pool(events)
         manager = TrackerSessionManager()
+        closing, gate = asyncio.Event(), asyncio.Event()
 
-        async def close_session(_resource, _state):
+        async def close(resource, state):
             closing.set()
-            await close_gate.wait()
-            events.append("closed")
+            await gate.wait()
+            events.append(("close", resource.key, state["count"]))
 
-        token = await manager.start(
-            binding=("job",), borrow=lambda: _borrow(events, "resource"),
-            open_session=lambda _resource: _value(None), close_session=close_session,
-        )
-        pending_close = asyncio.create_task(manager.close(token, ("job",)))
+        token = await manager.start(binding=("job",), borrow=borrow(pool, "model"),
+                                    open_session=open_state, close_session=close)
+        pending = asyncio.create_task(manager.close(token, ("job",)))
         await closing.wait()
-        pending_close.cancel()
-        pending_shutdown = asyncio.create_task(manager.shutdown())
+        pending.cancel()
+        shutdown = asyncio.create_task(manager.shutdown())
         await asyncio.sleep(0)
-        assert not pending_close.done()
-        assert not pending_shutdown.done()
+        assert not pending.done()
+        assert not shutdown.done()
         with pytest.raises(TrackerSessionLost):
-            await manager.call(token, ("job",), _increment)
-        close_gate.set()
+            await manager.call(token, ("job",), increment)
+        gate.set()
         with pytest.raises(asyncio.CancelledError):
-            await pending_close
-        await pending_shutdown
-        assert events == ["borrow:resource", "closed", "release:resource"]
+            await pending
+        await shutdown
+        assert (await pool.snapshot())["borrowers"] == 0
+        assert events.count(("close", "model", 0)) == 1
+        await pool.shutdown()
 
     asyncio.run(asyncio.wait_for(run(), 10))
 
 
-def test_failed_open_releases_borrow_without_poisoning_retirement() -> None:
-    async def run() -> None:
+def test_retiring_session_remains_counted_until_cleanup_finishes():
+    async def run():
         events = []
+        pool = make_pool(events)
+        manager = TrackerSessionManager()
+        closing, gate = asyncio.Event(), asyncio.Event()
+
+        async def open_counted(resource):
+            resource.active_sessions = 1
+            return {}
+
+        async def close(resource, _state):
+            closing.set()
+            await gate.wait()
+            resource.active_sessions = 0
+
+        await manager.start(binding=("job",), borrow=borrow(pool, "model"),
+                            open_session=open_counted, close_session=close)
+        assert (await pool.snapshot())["active_sessions"] == 1
+        unload = asyncio.create_task(pool.unload_all(reason="drain"))
+        await closing.wait()
+        assert (await pool.snapshot())["active_sessions"] == 1
+        gate.set()
+        await unload
+        assert (await pool.snapshot())["active_sessions"] == 0
+        await manager.shutdown()
+        await pool.shutdown()
+
+    asyncio.run(asyncio.wait_for(run(), 10))
+
+
+def test_close_drops_callback_resource_wrapper():
+    async def run():
+        events = []
+        pool = make_pool(events)
+        manager = TrackerSessionManager()
+        wrapper_ref = None
+
+        class Wrapper:
+            def __init__(self, resource):
+                self.resource = resource
+
+        @asynccontextmanager
+        async def wrapped_borrow():
+            nonlocal wrapper_ref
+            async with pool.borrow("model") as lease:
+                wrapper = Wrapper(lease.resource)
+                wrapper_ref = weakref.ref(wrapper)
+                yield lease, wrapper
+
+        async def open_wrapper(wrapper):
+            return {"key": wrapper.resource.key}
+
+        async def close_wrapper(wrapper, state):
+            assert wrapper.resource.key == state["key"]
+
+        token = await manager.start(binding=("job",), borrow=wrapped_borrow,
+                                    open_session=open_wrapper, close_session=close_wrapper)
+        assert wrapper_ref() is not None
+        await manager.close(token, ("job",))
+        gc.collect()
+        assert wrapper_ref() is None
+        await pool.shutdown()
+
+    asyncio.run(asyncio.wait_for(run(), 10))
+
+
+def test_failed_open_releases_borrow_without_poisoning_pool():
+    async def run():
+        events = []
+        pool = make_pool(events)
         manager = TrackerSessionManager()
 
-        async def fail(_resource):
+        async def failed_open(_resource):
             raise FileNotFoundError("input unavailable")
 
+        async def unexpected_close(_resource, _state):
+            raise AssertionError("failed open must not close a nonexistent state")
+
         with pytest.raises(FileNotFoundError):
-            await manager.start(
-                binding=("job",), borrow=lambda: _borrow(events, "resource"),
-                open_session=fail,
-                close_session=lambda _resource, _state: _event(events, "unexpected_close"),
-            )
+            await manager.start(binding=("job",), borrow=borrow(pool, "model"),
+                                open_session=failed_open, close_session=unexpected_close)
+        assert (await pool.snapshot())["borrowers"] == 0
         await manager.shutdown()
-        assert events == ["borrow:resource", "release:resource"]
+        await pool.shutdown()
 
     asyncio.run(asyncio.wait_for(run(), 10))
-
-
-@asynccontextmanager
-async def _borrow(events, name):
-    events.append(f"borrow:{name}")
-    try:
-        yield name
-    finally:
-        events.append(f"release:{name}")
-
-
-async def _value(value):
-    return value
-
-
-async def _increment(_resource, state):
-    state["count"] += 1
-    return state["count"]
-
-
-async def _event(events, value):
-    events.append(value)

@@ -12,7 +12,7 @@ import logging
 import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable, Hashable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Generic, TypeVar
@@ -26,6 +26,10 @@ ResourceT = TypeVar("ResourceT")
 
 class ManagedPoolBusyError(RuntimeError):
     """No pool slot can be changed without crossing a real owner."""
+
+
+class _PoolEntryRetired(LookupError):
+    """The exact entry is no longer available for a continuation."""
 
 
 class ManagedBuildTimeout(TimeoutError):
@@ -48,6 +52,18 @@ class BuildArtifact(Generic[ResourceT]):
     resource: ResourceT
     attachments: tuple[Any, ...] = ()
     cleanup_uncertain: bool = False
+    _owned_states: list[Any] = field(default_factory=list, repr=False)
+
+    def _invalidate_owned_states(self) -> None:
+        for state in self._owned_states:
+            state.invalidate()
+
+    async def _cleanup_owned_states(self) -> None:
+        while self._owned_states:
+            state = self._owned_states[0]
+            await state.cleanup()
+            if state in self._owned_states:
+                self._owned_states.remove(state)
 
 
 @dataclass(slots=True)
@@ -69,6 +85,22 @@ class ResourceLease(Generic[KeyT, ResourceT]):
     attachments: tuple[Any, ...]
     cache_hit: bool
     load_ms: int | None
+    _pool: Any = field(repr=False, compare=False)
+    _entry: Any = field(repr=False, compare=False)
+
+    def _attach_owned_state(self, state: Any) -> None:
+        self._entry.artifact._owned_states.append(state)
+
+    def _detach_owned_state(self, state: Any) -> None:
+        states = self._entry.artifact._owned_states
+        if state in states:
+            states.remove(state)
+
+    def _mark_cleanup_uncertain(self) -> None:
+        self._entry.artifact.cleanup_uncertain = True
+
+    def _borrow_entry(self) -> AbstractAsyncContextManager[Any]:
+        return self._pool._borrow_exact(self._entry)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +151,7 @@ class ManagedLruPool(Generic[KeyT, ResourceT]):
         self._cleanup_in_progress = False
         self._cleanup_failed = False
         self._cleanup_quarantine: list[BuildArtifact[ResourceT]] = []
+        self._retiring_artifacts: dict[int, BuildArtifact[ResourceT]] = {}
         self._pending_evictions: dict[
             asyncio.Task[_BuildResult],
             tuple[KeyT, BuildArtifact[ResourceT]],
@@ -156,9 +189,28 @@ class ManagedLruPool(Generic[KeyT, ResourceT]):
                 attachments=entry.artifact.attachments,
                 cache_hit=cache_hit,
                 load_ms=load_ms,
+                _pool=self,
+                _entry=entry,
             )
         finally:
             if use_lock_acquired:
+                entry.use_lock.release()
+            await self._release_borrower_cancellation_safe(entry)
+
+    @asynccontextmanager
+    async def _borrow_exact(self, entry: _PoolEntry[KeyT, ResourceT]) -> AsyncIterator[None]:
+        async with self._lock:
+            if self._entries.get(entry.key) is not entry:
+                raise _PoolEntryRetired("pool entry retired")
+            entry.borrowers += 1
+            self._touch_locked(entry, count_hit=True)
+        acquired = False
+        try:
+            await entry.use_lock.acquire()
+            acquired = True
+            yield
+        finally:
+            if acquired:
                 entry.use_lock.release()
             await self._release_borrower_cancellation_safe(entry)
 
@@ -265,6 +317,8 @@ class ManagedLruPool(Generic[KeyT, ResourceT]):
             if evicted is None:
                 raise ManagedPoolBusyError(f"all {self._pool_name} slots are active")
             self._entries.pop(evicted[0])
+            self._retiring_artifacts[id(evicted[1].artifact)] = evicted[1].artifact
+            evicted[1].artifact._invalidate_owned_states()
             self._record_evict_locked(evicted[0], "lru")
 
         evicted_key = evicted[0] if evicted is not None else None
@@ -301,9 +355,8 @@ class ManagedLruPool(Generic[KeyT, ResourceT]):
                 evicted_key = self._key_to_str(pending_key)
                 cleanup_artifacts = [pending_artifact]
                 pending_eviction = None
-                _, cleanup_cancelled = await self._run_executor_to_completion(
-                    self._release_artifacts_sync,
-                    cleanup_artifacts,
+                _, cleanup_cancelled = await self._run_task_to_completion(
+                    self._release_artifacts(cleanup_artifacts)
                 )
                 if cleanup_cancelled:
                     raise asyncio.CancelledError
@@ -343,9 +396,8 @@ class ManagedLruPool(Generic[KeyT, ResourceT]):
             cleanup_cancelled = False
             cleanup_error: BaseException | None = None
             try:
-                _, cleanup_cancelled = await self._run_executor_to_completion(
-                    self._release_artifacts_sync,
-                    cleanup_artifacts,
+                _, cleanup_cancelled = await self._run_task_to_completion(
+                    self._release_artifacts(cleanup_artifacts)
                 )
             except asyncio.CancelledError:
                 cleanup_cancelled = True
@@ -417,9 +469,8 @@ class ManagedLruPool(Generic[KeyT, ResourceT]):
         cleanup_error: BaseException | None = None
         if cleanup_artifacts:
             try:
-                await self._run_executor_to_completion(
-                    self._release_artifacts_sync,
-                    cleanup_artifacts,
+                await self._run_task_to_completion(
+                    self._release_artifacts(cleanup_artifacts)
                 )
             except BaseException as exc:
                 cleanup_error = exc
@@ -532,6 +583,16 @@ class ManagedLruPool(Generic[KeyT, ResourceT]):
         ):
             self._cleanup_failed = True
 
+    async def _release_artifacts(
+        self, artifacts: list[BuildArtifact[ResourceT]]
+    ) -> None:
+        for artifact in artifacts:
+            await artifact._cleanup_owned_states()
+            self._retiring_artifacts.pop(id(artifact), None)
+        if artifacts:
+            del artifact
+        await self._run_executor_to_completion(self._release_artifacts_sync, artifacts)
+
     def _release_artifacts_sync(
         self,
         artifacts: list[BuildArtifact[ResourceT]],
@@ -578,21 +639,22 @@ class ManagedLruPool(Generic[KeyT, ResourceT]):
 
             count = len(self._entries)
             if count == 0 and not force_cleanup:
+                if self._cleanup_failed:
+                    raise ManagedPoolBusyError(
+                        f"{self._pool_name} residency is unknown; full cleanup is required"
+                    )
                 return 0
             artifacts = [entry.artifact for entry in self._entries.values()]
             artifacts.extend(self._cleanup_quarantine)
             last_key = next(reversed(self._entries), None)
+            for artifact in artifacts:
+                self._retiring_artifacts[id(artifact)] = artifact
+                artifact._invalidate_owned_states()
             self._entries.clear()
             self._cleanup_quarantine.clear()
             self._cleanup_in_progress = True
 
-        cleanup = asyncio.ensure_future(
-            asyncio.get_running_loop().run_in_executor(
-                None,
-                self._release_artifacts_sync,
-                artifacts,
-            )
-        )
+        cleanup = asyncio.create_task(self._release_artifacts(artifacts))
         cancelled = False
         while not cleanup.done():
             try:
@@ -760,8 +822,15 @@ class ManagedLruPool(Generic[KeyT, ResourceT]):
                 "gpu_resident": gpu_resident,
                 "device": next(iter(devices)) if len(devices) == 1 else None,
                 "active_sessions": sum(
-                    int(getattr(entry.artifact.resource, "active_sessions", 0))
-                    for entry in self._entries.values()
+                    int(getattr(artifact.resource, "active_sessions", 0))
+                    for artifact in {
+                        id(artifact): artifact
+                        for artifact in (
+                            [entry.artifact for entry in self._entries.values()]
+                            + list(self._retiring_artifacts.values())
+                            + self._cleanup_quarantine
+                        )
+                    }.values()
                 ),
             }
 
