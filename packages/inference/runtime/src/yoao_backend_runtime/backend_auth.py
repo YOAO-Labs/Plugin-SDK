@@ -6,8 +6,8 @@ import os
 import secrets
 from pathlib import Path
 
-from aap_protocol_v2.backend_auth import BACKEND_SERVICES
-from aap_protocol_v2.managed_credential import CredentialFileError, read_credential
+from yoao_protocol_v2.backend_auth import BACKEND_SERVICES
+from yoao_protocol_v2.managed_credential import CredentialFileError, read_credential
 
 
 def manual_credential(provider: str) -> str:

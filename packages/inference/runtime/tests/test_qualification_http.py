@@ -2,8 +2,8 @@
 import httpx
 import pytest
 from fastapi import FastAPI
-from aap_backend_runtime.plugin_service import install_plugin_service
-from aap_backend_runtime.qualification_http import bind_operator_routes, http_client
+from yoao_backend_runtime.plugin_service import install_plugin_service
+from yoao_backend_runtime.qualification_http import bind_operator_routes, http_client
 
 
 @pytest.mark.asyncio

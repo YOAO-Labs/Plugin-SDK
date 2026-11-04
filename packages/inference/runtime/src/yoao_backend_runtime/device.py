@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 
-logger = logging.getLogger("aap_backend_runtime.device")
+logger = logging.getLogger("yoao_backend_runtime.device")
 
 # 已探测确定的有效推理设备 (None=未探测)。一旦退回 CPU 便 latch, 不再试 CUDA。
 _effective_device_cache: str | None = None

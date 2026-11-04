@@ -7,7 +7,7 @@ from base64 import b64encode
 
 import pytest
 
-from aap_backend_runtime import fetch_image
+from yoao_backend_runtime import fetch_image
 
 Image = pytest.importorskip("PIL.Image")
 

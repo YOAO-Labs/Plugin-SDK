@@ -4,9 +4,9 @@ This repository publishes capability-scoped SDKs for independent plugin authors;
 
 | Path | Python distribution | Purpose |
 | --- | --- | --- |
-| `packages/inference/sdk` | `aap-inference-plugin-sdk` | Detection author interfaces, HTTP adapter and author tooling |
-| `packages/inference/runtime` | `aap-backend-runtime` | Inference execution, cancellation and managed lifecycle helpers |
-| `packages/inference/mask-utils` | `anno-mask-utils` | Mask conversion helpers |
+| `packages/inference/sdk` | `yoao-inference-plugin-sdk` | Detection author interfaces, HTTP adapter and author tooling |
+| `packages/inference/runtime` | `yoao-backend-runtime` | Inference execution, cancellation and managed lifecycle helpers |
+| `packages/inference/mask-utils` | `yoao-mask-utils` | Mask conversion helpers |
 
 UI, trainers and data export may gain separate capability packages when implemented; they do not inherit detection, HTTP or GPU APIs merely to be plugins. First-party SDK code is [MIT](LICENSE); third-party dependencies and assets retain their own terms.
 
@@ -14,7 +14,7 @@ Inference code is grouped under one capability directory, `packages/inference/`.
 
 ## Portable contracts and local development
 
-Python 3.11 or newer is needed for all three packages together. The platform is the authoritative contract source; its five portable wheels are mirrored for anonymous distribution in this SDK repository's immutable [`contracts-906628f2619b` release](https://github.com/YOAO-Labs/Plugin-SDK/releases/tag/contracts-906628f2619b). The fetcher pins the manifest SHA-256 `5c26a3829073324bf6f9cc29521457d296920424e5b1b3c34d672408aa956663`, checks platform source revision `906628f2619be01ec8dd96f03385218e3626b64c`, and verifies every wheel against that manifest. It needs no platform checkout or GitHub credentials.
+Python 3.11 or newer is needed for all three packages together. The platform owns the portable contract source; obtain a manifest and wheels built from the desired platform revision, and the independently verified manifest SHA-256. The fetcher verifies the manifest and each selected wheel. The previous `contracts-906628f2619b` release is historical and does not provide the renamed distributions. CI requires repository variables `CONTRACT_MANIFEST_URL` and `CONTRACT_MANIFEST_SHA256` pointing to matching artifacts; until supplied, contract-dependent jobs fail rather than assume a release exists.
 
 Managed checkpoint compatibility requires an explicit `format`: `null` identifies a native checkpoint without a separate export-format identity; named formats use nonempty strings. Null is not a wildcard, and omitting the field is invalid. The platform still matches the approved manifest, observed capabilities, checkpoint receipt and runtime device.
 
@@ -22,7 +22,7 @@ Plugins describe the required assets for each model and complete variant. The pl
 
 Native Torch lifecycle reports describe their model pools without an empty `session_counts` field. ONNX Runtime plugins additionally record the actual per-pool session counts and CUDA provider observations; the runtime checks those against the complete report rather than treating a missing session as qualified.
 
-Full HTTP implementations can reuse `aap_backend_runtime.qualification_http` with the runtime's
+Full HTTP implementations can reuse `yoao_backend_runtime.qualification_http` with the runtime's
 `qualification` extra for real loopback route-admission checks. The caller owns the dedicated app
 lifespan, credentials and actual model/lifecycle scenarios; the helper does not qualify an artifact
 or authorize access to a live platform. It supports Python 3.10 without the author SDK.
@@ -30,16 +30,16 @@ or authorize access to a live platform. It supports Python 3.10 without the auth
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install build 'setuptools>=68' wheel pytest pytest-asyncio
-python scripts/fetch-contracts.py /tmp/aap-contracts
-python -m pip install /tmp/aap-contracts/*.whl
-python -m pip install -e 'packages/inference/runtime[test]' -e packages/inference/sdk -e packages/inference/mask-utils
+python -m pip install build 'setuptools>=68' wheel pytest pytest-asyncio PyJWT uvicorn
+python scripts/fetch-contracts.py --manifest "$CONTRACT_MANIFEST" --sha256 "$CONTRACT_MANIFEST_SHA256" --output /tmp/yoao-contracts
+python scripts/build-sdk-artifacts.py --revision HEAD --output /tmp/yoao-sdk
+python -m pip install /tmp/yoao-contracts/*.whl /tmp/yoao-sdk/*.whl
 python -m pytest packages/inference/runtime/tests
 python -m pytest packages/inference/sdk/tests
 python -m pytest packages/inference/mask-utils/tests
 ```
 
-For author commands and their arguments, use `aap-inference-plugin --help`, `aap-inference-plugin build --help`, and `aap-inference-plugin check --help`. `aap-inference-plugin build /path/to/your-plugin` builds a wheel. HTTP checks require a running service and fixture data; GPU qualification requires explicit exclusive hardware and evidence. Neither a successful wheel build nor an HTTP check grants platform-managed qualification or permission to redistribute models. See the inference SDK package documentation for author workflow and provider requirements.
+For author commands and their arguments, use `yoao-plugin --help`, `yoao-plugin build --help`, and `yoao-plugin check --help`. `yoao-plugin build /path/to/your-plugin` builds a wheel. HTTP checks require a running service and fixture data; GPU qualification requires explicit exclusive hardware and evidence. Neither a successful wheel build nor an HTTP check grants platform-managed qualification or permission to redistribute models. See the inference SDK package documentation for author workflow and provider requirements.
 
 ## Stateful tracker sessions
 

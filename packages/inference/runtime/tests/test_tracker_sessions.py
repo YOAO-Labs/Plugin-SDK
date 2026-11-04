@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from aap_backend_runtime import (
+from yoao_backend_runtime import (
     BuildArtifact,
     ManagedLruPool,
     ManagedPoolBusyError,

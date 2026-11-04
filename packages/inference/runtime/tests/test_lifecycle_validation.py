@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from aap_backend_runtime.lifecycle_validation import exercise_lifecycle_fault_matrix
+from yoao_backend_runtime.lifecycle_validation import exercise_lifecycle_fault_matrix
 
 
 class _Response:

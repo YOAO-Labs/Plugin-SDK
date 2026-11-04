@@ -30,13 +30,13 @@ name = "my-color-region-plugin"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "aap-inference-plugin-sdk==0.1.0",
-    "aap-backend-runtime==0.1.0",
-    "aap-inference-contract==0.1.0",
-    "aap-lifecycle-contract==0.1.0",
-    "aap-protocol-v2==0.2.0",
-    "aap-task-contract==0.1.0",
-    "aap-training-contract==0.1.0",
+    "yoao-inference-plugin-sdk==0.1.0",
+    "yoao-backend-runtime==0.1.0",
+    "yoao-inference-contract==0.1.0",
+    "yoao-lifecycle-contract==0.1.0",
+    "yoao-protocol-v2==0.2.0",
+    "yoao-task-contract==0.1.0",
+    "yoao-training-contract==0.1.0",
 ]
 
 [project.scripts]
@@ -45,14 +45,6 @@ my-color-region-plugin = "my_color_region_plugin:main"
 [tool.setuptools]
 py-modules = ["my_color_region_plugin"]
 
-[tool.uv.sources]
-aap-inference-plugin-sdk = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/python-sdk-0.1.0/aap_inference_plugin_sdk-0.1.0-py3-none-any.whl" }
-aap-backend-runtime = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/python-sdk-0.1.0/aap_backend_runtime-0.1.0-py3-none-any.whl" }
-aap-inference-contract = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/contracts-3d6393e64630/aap_inference_contract-0.1.0-py3-none-any.whl" }
-aap-lifecycle-contract = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/contracts-3d6393e64630/aap_lifecycle_contract-0.1.0-py3-none-any.whl" }
-aap-protocol-v2 = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/contracts-3d6393e64630/aap_protocol_v2-0.2.0-py3-none-any.whl" }
-aap-task-contract = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/contracts-3d6393e64630/aap_task_contract-0.1.0-py3-none-any.whl" }
-aap-training-contract = { url = "https://github.com/YOAO-Labs/Plugin-SDK/releases/download/contracts-3d6393e64630/aap_training_contract-0.1.0-py3-none-any.whl" }
 """,
         encoding="utf-8",
     )
@@ -67,7 +59,7 @@ from typing import Any
 
 from PIL import ImageChops
 from PIL.Image import Image
-from aap_inference_plugin import Detection, DetectionConfig, DetectionModel, create_detection_app
+from yoao_inference_plugin import Detection, DetectionConfig, DetectionModel, create_detection_app
 import uvicorn
 
 
@@ -144,7 +136,7 @@ def dev_server(args) -> None:
     command = [executable, "serve", "--device", args.device,
                "--token-file", str(args.token_file.resolve()),
                "--host", "127.0.0.1", "--port", str(args.port), *extra]
-    with tempfile.TemporaryDirectory(prefix="aap-inference-dev-") as state:
+    with tempfile.TemporaryDirectory(prefix="yoao-inference-dev-") as state:
         environment = {key: value for key, value in os.environ.items()
                        if not key.startswith(("AAP_ROUTE_", "AAP_PLUGIN_"))}
         environment["AAP_PLUGIN_DATA_DIR"] = state
@@ -191,7 +183,7 @@ def dev_server(args) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="aap-inference-plugin")
+    parser = argparse.ArgumentParser(prog="yoao-plugin")
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser("init")
     init.add_argument("directory", type=Path)
@@ -310,7 +302,7 @@ def main() -> None:
                 )
             else:
                 subprocess.run(
-                    [sys.executable, "-m", "build", "--wheel", str(args.directory)],
+                    [sys.executable, "-m", "build", "--wheel", "--no-isolation", str(args.directory)],
                     check=True,
                 )
                 for artifact in sorted((args.directory / "dist").glob("*.whl")):
@@ -318,7 +310,7 @@ def main() -> None:
                         f"{hashlib.sha256(artifact.read_bytes()).hexdigest()}  {artifact}"
                     )
     except (OSError, ValueError, httpx.HTTPError, subprocess.SubprocessError) as exc:
-        print(f"aap-inference-plugin: {exc}", file=sys.stderr)
+        print(f"yoao-plugin: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
 

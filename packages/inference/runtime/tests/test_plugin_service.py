@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from aap_backend_runtime.plugin_service import install_plugin_service
+from yoao_backend_runtime.plugin_service import install_plugin_service
 
 
 def test_plugin_auth_rejects_missing_and_incorrect_tokens(tmp_path, monkeypatch):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aap_backend_runtime import versions_payload
+from yoao_backend_runtime import versions_payload
 
 
 def test_versions_payload_basic() -> None:

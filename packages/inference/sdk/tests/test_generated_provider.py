@@ -4,8 +4,8 @@ import importlib.util
 import pytest
 from PIL import Image
 
-from aap_inference_plugin import Detection
-from aap_inference_plugin.cli import init_project
+from yoao_inference_plugin import Detection
+from yoao_inference_plugin.cli import init_project
 
 
 def test_generated_color_region_bounds_and_empty_image(tmp_path):

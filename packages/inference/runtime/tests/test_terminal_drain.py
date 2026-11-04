@@ -6,8 +6,8 @@ import time
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from aap_protocol_v2.errors import LifecycleHTTPError
-from aap_protocol_v2.lifecycle import (
+from yoao_protocol_v2.errors import LifecycleHTTPError
+from yoao_protocol_v2.lifecycle import (
     AdmissionScope,
     AdmissionTokenClaims,
     LifecycleModeRequest,
@@ -15,8 +15,8 @@ from aap_protocol_v2.lifecycle import (
     sign_admission_token,
 )
 
-from aap_backend_runtime import BuildArtifact, ManagedLruPool
-from aap_backend_runtime.gpu_lifecycle import ManagedGpuLifecycle
+from yoao_backend_runtime import BuildArtifact, ManagedLruPool
+from yoao_backend_runtime.gpu_lifecycle import ManagedGpuLifecycle
 
 
 def _pool(build=None, cleanup=None):

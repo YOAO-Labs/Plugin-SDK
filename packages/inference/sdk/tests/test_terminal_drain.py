@@ -6,7 +6,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from aap_inference_plugin import DetectionConfig, create_detection_app
+from yoao_inference_plugin import DetectionConfig, create_detection_app
 from test_detection_app import Model, Provider, TOKEN, image_url
 
 
@@ -193,9 +193,9 @@ def test_unqualified_bound_cuda_advertises_only_signed_terminal_control():
 
 
 def test_cuda_terminal_drain_requires_and_consumes_signed_gpu_authority():
-    from aap_protocol_v2.lifecycle import AdmissionScope
+    from yoao_protocol_v2.lifecycle import AdmissionScope
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from aap_inference_plugin.qualification import _sign
+    from yoao_inference_plugin.qualification import _sign
 
     registry, resource = str(uuid4()), "local/GPU-123"
     key = Ed25519PrivateKey.generate()

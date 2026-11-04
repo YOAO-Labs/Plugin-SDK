@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from aap_lifecycle_contract import (
+from yoao_lifecycle_contract import (
     EVIDENCE_SCHEMA_VERSION as _EVIDENCE_SCHEMA_VERSION,
     MAX_UNLOADED_SPREAD_MB as _MAX_UNLOADED_SPREAD_MB,
     MIN_WORKING_SET_RECOVERY_RATIO as _MIN_WORKING_SET_RECOVERY_RATIO,

@@ -2,9 +2,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from aap_protocol_v2.backend_auth import BACKEND_SERVICES, validate_backend_urls
-from aap_backend_runtime.backend_auth import install_backend_auth
-from aap_protocol_v2.managed_credential import ensure_credential
+from yoao_protocol_v2.backend_auth import BACKEND_SERVICES, validate_backend_urls
+from yoao_backend_runtime.backend_auth import install_backend_auth
+from yoao_protocol_v2.managed_credential import ensure_credential
 
 
 @pytest.mark.parametrize("provider", BACKEND_SERVICES)
@@ -102,7 +102,7 @@ def test_deployment_mapping_rejects_ambiguous_or_untrusted_urls(mapping):
 
 def test_external_bearer_requires_one_long_exact_token():
     from fastapi import Request
-    from aap_backend_runtime.backend_auth import require_external_bearer
+    from yoao_backend_runtime.backend_auth import require_external_bearer
 
     app = FastAPI()
     @app.get("/protected")

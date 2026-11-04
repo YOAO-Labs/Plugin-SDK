@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "anno-mask-utils"
+name = "yoao-mask-utils"
 version = "0.1.0"
 description = "共享 mask -> polygon 工具，被 grounded-sam2-backend / sam3-backend 复用"
 requires-python = ">=3.10"

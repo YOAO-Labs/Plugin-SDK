@@ -75,7 +75,7 @@ EXPOSE 8000
 ENTRYPOINT {json.dumps(command)}
 CMD []
 '''
-    with tempfile.TemporaryDirectory(prefix="aap-plugin-image-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="yoao-plugin-image-") as temporary:
         context = Path(temporary)
         (context / "wheelhouse").mkdir()
         for wheel in wheelhouse.glob("*.whl"):

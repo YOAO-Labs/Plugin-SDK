@@ -1,4 +1,4 @@
-# aap-backend-runtime
+# yoao-backend-runtime
 
 ML backend 运行时共享组件（无状态叶子函数、取消安全的 LRU 池与会话所有权内核）。单一来源，避免跨 backend 复制漂移。
 
@@ -27,7 +27,7 @@ ML backend 运行时共享组件（无状态叶子函数、取消安全的 LRU �
   保留受控模型收据、运行时摘要、fixture 尺寸及逐轮结果等结构化证据；
   仍执行递归敏感字段检查，不替代检查项，也不改变严格的运行时池拓扑绑定。
 - `artifact_evidence()` — 生成不含本地路径的权重/fixture 摘要。
-- `aap-lifecycle-contract` 提供独立于模型运行时的严格报告验证、必做检查常量与
+- `yoao-lifecycle-contract` 提供独立于模型运行时的严格报告验证、必做检查常量与
   `memory_cycle_evidence()`；稳定窗口为 64 MiB，工作集回收率至少 90%。
 - `ManagedLruPool` / `BuildArtifact` / `ManagedBuildTimeout` / `ManagedPoolBusyError` /
   `ResourceLease` — 取消安全的 LRU 所有权内核 (builder 单飞、borrower 串行、租约、
@@ -100,7 +100,7 @@ terminal_cpu_enabled=False, allow_legacy_workloads=True)` — 签名控制、gen
 backend 代码:
 
 ```python
-from aap_backend_runtime import (
+from yoao_backend_runtime import (
     fetch_image,
     free_gpu_memory,
     gpu_info_snapshot,

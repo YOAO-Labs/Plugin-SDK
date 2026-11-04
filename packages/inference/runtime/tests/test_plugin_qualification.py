@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from aap_backend_runtime.plugin_service import plugin_verified_lifecycle
-from aap_lifecycle_contract import REQUIRED_CONTRACT_CHECKS, memory_cycle_evidence
+from yoao_backend_runtime.plugin_service import plugin_verified_lifecycle
+from yoao_lifecycle_contract import REQUIRED_CONTRACT_CHECKS, memory_cycle_evidence
 
 
 @pytest.fixture

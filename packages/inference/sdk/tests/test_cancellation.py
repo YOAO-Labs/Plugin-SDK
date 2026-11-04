@@ -4,7 +4,7 @@ import threading
 import httpx
 import pytest
 
-from aap_inference_plugin import DetectionConfig, create_detection_app
+from yoao_inference_plugin import DetectionConfig, create_detection_app
 from test_detection_app import Model, TOKEN, image_url
 
 

@@ -11,12 +11,12 @@ import httpx
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from aap_backend_runtime.backend_auth import require_external_bearer
-from aap_backend_runtime.gpu_lifecycle import ManagedGpuLifecycle
-from aap_backend_runtime.managed_pool import BuildArtifact, ManagedLruPool
-from aap_backend_runtime.versions import versions_payload
-from aap_protocol_v2 import BatchPredictResponse, PredictionResult, TaskItem
-from aap_protocol_v2.lifecycle import (
+from yoao_backend_runtime.backend_auth import require_external_bearer
+from yoao_backend_runtime.gpu_lifecycle import ManagedGpuLifecycle
+from yoao_backend_runtime.managed_pool import BuildArtifact, ManagedLruPool
+from yoao_backend_runtime.versions import versions_payload
+from yoao_protocol_v2 import BatchPredictResponse, PredictionResult, TaskItem
+from yoao_protocol_v2.lifecycle import (
     AdmissionScope,
     GenerationTransitionRequest,
     LifecycleModeRequest,
@@ -31,8 +31,8 @@ from aap_protocol_v2.lifecycle import (
     parse_gpu_admission_header_values,
     parse_gpu_control_token_header_values,
 )
-from aap_protocol_v2.routing_runtime import install_backend_routing_controller
-from aap_protocol_v2.version import PROTOCOL_VERSION, COMPAT_PROTOCOL_VERSIONS
+from yoao_protocol_v2.routing_runtime import install_backend_routing_controller
+from yoao_protocol_v2.version import PROTOCOL_VERSION, COMPAT_PROTOCOL_VERSIONS
 
 from .conversion import rectangles
 from .image import fetch_image
@@ -118,7 +118,7 @@ def create_detection_app(
         finally:
             await lifecycle.shutdown()
 
-    app = FastAPI(title="AAP detection plugin", lifespan=lifespan)
+    app = FastAPI(title="YOAO detection plugin", lifespan=lifespan)
 
     @app.middleware("http")
     async def authentication(request: Request, call_next):

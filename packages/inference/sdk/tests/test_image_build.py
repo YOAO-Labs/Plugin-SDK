@@ -1,6 +1,6 @@
 import pytest
 
-from aap_inference_plugin.image_build import _locked_names, build_image
+from yoao_inference_plugin.image_build import _locked_names, build_image
 
 
 @pytest.mark.parametrize(

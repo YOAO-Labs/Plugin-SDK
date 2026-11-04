@@ -12,7 +12,7 @@ import uuid
 import httpx
 import jwt
 import uvicorn
-from aap_protocol_v2.routing import (
+from yoao_protocol_v2.routing import (
     ROUTE_ADMISSION_AUDIENCE, ROUTE_ADMISSION_HEADER, ROUTE_ADMISSION_PROTOCOL,
     ROUTE_CONTROL_PATH, ROUTE_CONTROL_PROTOCOL,
 )

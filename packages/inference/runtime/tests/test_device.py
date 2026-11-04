@@ -9,15 +9,15 @@ import threading
 
 import pytest
 
-import aap_backend_runtime.device as device_mod
-from aap_backend_runtime import (
+import yoao_backend_runtime.device as device_mod
+from yoao_backend_runtime import (
     DeviceUnavailableError,
     effective_device,
     effective_device_value,
     latch_cpu,
     require_gpu_device,
 )
-from aap_backend_runtime.device import is_device_error
+from yoao_backend_runtime.device import is_device_error
 
 
 @pytest.fixture(autouse=True)

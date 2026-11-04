@@ -1,4 +1,4 @@
-# anno-mask-utils
+# yoao-mask-utils
 
 共享的 mask → polygon 工具包。被以下 backend 复用：
 

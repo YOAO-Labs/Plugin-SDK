@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from aap_backend_runtime import deployment_verified_flag
+from yoao_backend_runtime import deployment_verified_flag
 
 
 FIRST_PARTY_GATES = (

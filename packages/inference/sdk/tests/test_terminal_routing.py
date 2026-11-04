@@ -3,9 +3,9 @@ import base64
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-from aap_protocol_v2.routing import ROUTE_CONTROL_PATH, ROUTE_CONTROL_PROTOCOL
+from yoao_protocol_v2.routing import ROUTE_CONTROL_PATH, ROUTE_CONTROL_PROTOCOL
 
-from aap_inference_plugin import DetectionConfig, create_detection_app
+from yoao_inference_plugin import DetectionConfig, create_detection_app
 from test_detection_app import Provider, TOKEN
 
 

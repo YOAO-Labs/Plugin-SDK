@@ -12,19 +12,19 @@ from typing import Any, Callable, Mapping, Sequence
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from aap_lifecycle_contract import validate_managed_lifecycle_evidence
-from aap_backend_runtime.backend_auth import require_external_bearer
-from aap_protocol_v2.errors import LifecycleErrorCode, LifecycleHTTPError
-from aap_protocol_v2.lifecycle import (
+from yoao_lifecycle_contract import validate_managed_lifecycle_evidence
+from yoao_backend_runtime.backend_auth import require_external_bearer
+from yoao_protocol_v2.errors import LifecycleErrorCode, LifecycleHTTPError
+from yoao_protocol_v2.lifecycle import (
     GPU_ADMISSION_TOKEN_HEADER,
     GPU_GENERATION_HEADER,
     GenerationTransitionRequest,
     TerminalDrainRequest,
     parse_gpu_admission_header_values,
 )
-from aap_protocol_v2.routing import ROUTE_CONTROL_PATH, ROUTE_STATUS_PATH
-from aap_protocol_v2.routing_runtime import install_backend_routing_controller
-from aap_protocol_v2.scope_retirement import SCOPE_RETIREMENT_PATH
+from yoao_protocol_v2.routing import ROUTE_CONTROL_PATH, ROUTE_STATUS_PATH
+from yoao_protocol_v2.routing_runtime import install_backend_routing_controller
+from yoao_protocol_v2.scope_retirement import SCOPE_RETIREMENT_PATH
 
 
 def plugin_lifecycle_options() -> dict[str, Any]:

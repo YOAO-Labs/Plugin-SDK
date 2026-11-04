@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from aap_inference_plugin import Detection, DetectionConfig, create_detection_app
+from yoao_inference_plugin import Detection, DetectionConfig, create_detection_app
 
 
 TOKEN = "a" * 32
@@ -131,7 +131,7 @@ def test_class_filter_applies_to_emitted_detections():
 
 
 def test_reject_local_file_and_unapproved_host():
-    from aap_inference_plugin.image import fetch_image
+    from yoao_inference_plugin.image import fetch_image
 
     with pytest.raises(ValueError):
         fetch_image("/etc/passwd", [])
@@ -140,7 +140,7 @@ def test_reject_local_file_and_unapproved_host():
 
 
 def test_reject_invalid_detection_instead_of_returning_empty_success():
-    from aap_inference_plugin.conversion import rectangles
+    from yoao_inference_plugin.conversion import rectangles
 
     with pytest.raises(ValueError):
         rectangles([Detection(1, 0, 11, 2, 0, 0.5)], ["cat"], 10, 10)
@@ -148,7 +148,7 @@ def test_reject_invalid_detection_instead_of_returning_empty_success():
 
 
 def test_boxes_touching_image_edges_stay_inside_percentage_bounds():
-    from aap_inference_plugin.conversion import rectangles
+    from yoao_inference_plugin.conversion import rectangles
 
     value = rectangles(
         [Detection(669.6178588867188, 669.6178588867188, 810, 810, 0, 0.9)],

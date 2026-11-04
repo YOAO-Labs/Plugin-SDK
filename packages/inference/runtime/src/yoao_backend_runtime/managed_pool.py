@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Generic, TypeVar
 
-logger = logging.getLogger("aap_backend_runtime.managed-pool")
+logger = logging.getLogger("yoao_backend_runtime.managed-pool")
 UTC = timezone.utc
 
 KeyT = TypeVar("KeyT", bound=Hashable)

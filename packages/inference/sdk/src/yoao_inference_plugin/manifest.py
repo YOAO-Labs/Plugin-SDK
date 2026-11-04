@@ -1,7 +1,7 @@
 """Validate plugin installation intent using the shared inference contract."""
 from pathlib import Path
 
-from aap_inference_contract.plugin import PluginManifest
+from yoao_inference_contract.plugin import PluginManifest
 
 
 def load_manifest(path: str | Path) -> PluginManifest:

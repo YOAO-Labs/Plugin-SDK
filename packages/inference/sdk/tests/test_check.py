@@ -3,9 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from aap_inference_plugin.check import _assert_matches, load_fixtures
-from aap_inference_plugin import qualification
-from aap_inference_plugin.qualification import _validate_native
+from yoao_inference_plugin.check import _assert_matches, load_fixtures
+from yoao_inference_plugin import qualification
+from yoao_inference_plugin.qualification import _validate_native
 
 
 def fixture():

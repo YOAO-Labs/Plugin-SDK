@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from aap_inference_plugin import DetectionConfig, create_detection_app
+from yoao_inference_plugin import DetectionConfig, create_detection_app
 from test_detection_app import Model, TOKEN, image_url
 
 VERSION = "7c5fba75-1432-458d-b874-111111111111"

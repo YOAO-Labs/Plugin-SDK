@@ -8,13 +8,13 @@ import types
 
 import pytest
 
-from aap_backend_runtime import (
+from yoao_backend_runtime import (
     free_gpu_memory,
     gpu_info_snapshot,
     physical_gpu_identity,
     validate_single_gpu_device_set,
 )
-from aap_backend_runtime.gpu import (
+from yoao_backend_runtime.gpu import (
     observed_cuda_runtime_version,
     observed_single_nvidia_gpu,
 )
@@ -104,7 +104,7 @@ def test_single_gpu_device_set_allows_cuda_image_default_without_runtime(
     monkeypatch, value: str
 ) -> None:
     monkeypatch.setattr(
-        "aap_backend_runtime.gpu._gpu_runtime_device_present",
+        "yoao_backend_runtime.gpu._gpu_runtime_device_present",
         lambda: False,
     )
 
@@ -116,7 +116,7 @@ def test_single_gpu_device_set_rejects_all_with_gpu_runtime(
     monkeypatch, value: str
 ) -> None:
     monkeypatch.setattr(
-        "aap_backend_runtime.gpu._gpu_runtime_device_present",
+        "yoao_backend_runtime.gpu._gpu_runtime_device_present",
         lambda: True,
     )
 
@@ -178,7 +178,7 @@ def test_explicit_physical_gpu_token_is_strict(value: str) -> None:
 def test_observed_gpu_requires_exact_single_physical_identity(monkeypatch) -> None:
     uuid = "GPU-0d0ff398-3fa6-778c-8611-a45fbadecabb"
     monkeypatch.setattr(
-        "aap_backend_runtime.gpu.subprocess.check_output",
+        "yoao_backend_runtime.gpu.subprocess.check_output",
         lambda *args, **kwargs: f"{uuid}, 24576, 560.35\n",
     )
     assert observed_single_nvidia_gpu(uuid) == {
@@ -202,7 +202,7 @@ def test_observed_gpu_requires_exact_single_physical_identity(monkeypatch) -> No
 )
 def test_observed_gpu_rejects_missing_or_ambiguous_facts(monkeypatch, output) -> None:
     monkeypatch.setattr(
-        "aap_backend_runtime.gpu.subprocess.check_output",
+        "yoao_backend_runtime.gpu.subprocess.check_output",
         lambda *args, **kwargs: output,
     )
     with pytest.raises(RuntimeError):
@@ -221,7 +221,7 @@ def test_observed_cuda_runtime_uses_library_result(
         return status
 
     monkeypatch.setattr(
-        "aap_backend_runtime.gpu.ctypes.CDLL",
+        "yoao_backend_runtime.gpu.ctypes.CDLL",
         lambda name: types.SimpleNamespace(cudaRuntimeGetVersion=get_version),
     )
     if expected is None:
@@ -235,7 +235,7 @@ def test_observed_cuda_runtime_requires_library(monkeypatch):
     def missing(_name):
         raise OSError("not installed")
 
-    monkeypatch.setattr("aap_backend_runtime.gpu.ctypes.CDLL", missing)
+    monkeypatch.setattr("yoao_backend_runtime.gpu.ctypes.CDLL", missing)
     with pytest.raises(RuntimeError, match="Cannot inspect"):
         observed_cuda_runtime_version()
 
@@ -246,6 +246,6 @@ def test_observed_cuda_runtime_rejects_missing_requested_abi(monkeypatch):
             return types.SimpleNamespace(cudaRuntimeGetVersion=lambda pointer: 0)
         raise OSError("CUDA 13 is not installed")
 
-    monkeypatch.setattr("aap_backend_runtime.gpu.ctypes.CDLL", load)
+    monkeypatch.setattr("yoao_backend_runtime.gpu.ctypes.CDLL", load)
     with pytest.raises(RuntimeError, match="Cannot inspect"):
         observed_cuda_runtime_version("libcudart.so.13")

@@ -3,9 +3,9 @@ from uuid import uuid4
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 
-from aap_inference_plugin import DetectionConfig, create_detection_app
-from aap_inference_plugin.qualification import _sign
-from aap_protocol_v2.lifecycle import AdmissionScope
+from yoao_inference_plugin import DetectionConfig, create_detection_app
+from yoao_inference_plugin.qualification import _sign
+from yoao_protocol_v2.lifecycle import AdmissionScope
 from test_detection_app import TOKEN, image_url
 from test_managed_models import IDENTITY, Install, Provider, Store, VERSION
 

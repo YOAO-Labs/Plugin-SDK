@@ -16,7 +16,7 @@ import uuid
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from aap_protocol_v2.lifecycle import AdmissionScope, AdmissionTokenClaims, encode_ed25519_public_key, sign_admission_token
+from yoao_protocol_v2.lifecycle import AdmissionScope, AdmissionTokenClaims, encode_ed25519_public_key, sign_admission_token
 
 from .check import _data_url, check_http, load_fixtures
 
@@ -153,7 +153,7 @@ def qualify_local(fixtures: Path, device: str, gpu_uuid: str, asset_dir: Path, r
     _, paths = load_fixtures(fixtures)
     if not 0 < paths["multi"].stat().st_size <= 2 * 1024 * 1024:
         raise ValueError("local cancellation fixture must be a nonempty image no larger than 2 MiB")
-    with tempfile.TemporaryDirectory(prefix="aap-plugin-check-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="yoao-plugin-check-") as tmp:
         root = Path(tmp)
         native_path = root / "native.json"
         command = [executable, "probe", "--device", device, "--gpu-uuid", gpu_uuid,
