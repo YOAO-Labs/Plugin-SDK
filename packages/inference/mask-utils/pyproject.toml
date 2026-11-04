@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "yoao-mask-utils"
 version = "0.1.0"
-description = "共享 mask -> polygon 工具，被 grounded-sam2-backend / sam3-backend 复用"
+description = "Grounded SAM2 与 SAM3 推理插件共享的 mask 转 polygon 工具"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 dependencies = [

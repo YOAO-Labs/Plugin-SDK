@@ -8,10 +8,9 @@ version = "0.1.0"
 description = "推理插件共享运行时：输入读取、取消安全模型池、有状态追踪与受控 GPU 生命周期"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-# torch 故意不在此声明: 各 backend 的 torch / torchvision 由 docker base image 锁定 (见各
-# backend pyproject 注释), 在此声明会让 `pip install -e` 误升级覆盖预装版本。free_gpu_memory /
-# gpu_info_snapshot 内部把 `import torch` 包在 try 里, torch 不可用时降级为 no-op / 返回 {}。
-# httpx / pillow 仅 fetch_image 用 (惰性 import), onnxtools / rapidocr 经本包 editable 安装补上 pillow。
+# Torch and TorchVision are pinned by each consuming plugin's environment or image,
+# not by this shared runtime. Installing the runtime must not replace those pins.
+# HTTP input fetching and image decoding use the declared HTTPX and Pillow dependencies.
 dependencies = [
     "yoao-lifecycle-contract",
     "yoao-protocol-v2",
