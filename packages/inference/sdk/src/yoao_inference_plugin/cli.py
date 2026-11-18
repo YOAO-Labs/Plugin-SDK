@@ -17,6 +17,8 @@ import time
 
 import httpx
 
+from .child_environment import isolated_provider_environment
+
 
 def init_project(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=False)
@@ -137,8 +139,7 @@ def dev_server(args) -> None:
                "--token-file", str(args.token_file.resolve()),
                "--host", "127.0.0.1", "--port", str(args.port), *extra]
     with tempfile.TemporaryDirectory(prefix="yoao-inference-dev-") as state:
-        environment = {key: value for key, value in os.environ.items()
-                       if not key.startswith(("AAP_ROUTE_", "AAP_PLUGIN_"))}
+        environment = isolated_provider_environment(os.environ)
         environment["AAP_PLUGIN_DATA_DIR"] = state
         process = subprocess.Popen(command, env=environment)
         try:

@@ -17,7 +17,7 @@ ML backend 运行时共享组件（无状态叶子函数、取消安全的 LRU �
 - `gpu_info_snapshot() -> dict` — torch CUDA context 视角显存快照 (used/total/free MB 等);
   无 torch / 无 GPU 返回 `{}`，并叠加宿主可见的物理卡身份。
 - `physical_gpu_identity() -> dict` — 从部署时与 device reservation 同源的
-  `AAP_GPU_PHYSICAL_DEVICE_TOKEN` 解析宿主物理卡 token；它未设置时才回落
+  `GPU_PHYSICAL_DEVICE_TOKEN` 解析宿主物理卡 token；它未设置时才回落
   runtime 可见设备配置，避免把重映射后的逻辑 `cuda:0` 误当宿主卡 0。
 - `validate_single_gpu_device_set()` — backend 启动门禁，拒绝逗号多卡列表和已暴露 GPU 的无界 `all` 可见集合。
 - `observed_cuda_runtime_version(library_name="libcudart.so.12")` — 读取配置的 CUDA
@@ -92,6 +92,10 @@ terminal_cpu_enabled=False, allow_legacy_workloads=True)` — 签名控制、gen
   try 里, 不可用时降级。
 - lifecycle evidence helper 只使用 Python 标准库，不读取或持久化签名私钥、admission token、
   原始业务图像、文件路径或 signed URL；证据应写入仓库外的受限目录。
+- 专用 backend 进程只读取 `BACKEND_AUTH_DIR` 与 `GPU_PHYSICAL_DEVICE_TOKEN`；路由控制
+  `ROUTE_CONTROL_TOKEN(_FILE)` 由契约包的 routing runtime 读取。上述三个位置的旧
+  `AAP_` 键名仍存在时显式拒绝启动或认证，错误只报告键名、不输出值，也不静默回退到
+  默认目录或可见设备。
 
 ## 安装与引用
 

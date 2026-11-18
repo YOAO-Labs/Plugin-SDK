@@ -82,6 +82,7 @@ def test_qualification_runs_selected_script_for_probe_and_server(tmp_path, monke
               "platform_managed_qualified": False,
               "checks": {name: {"passed": True, "detail": "observed"} for name in names}}
     commands = []
+    environments = []
     def run(command, **kwargs):
         commands.append(command)
         from pathlib import Path
@@ -96,6 +97,7 @@ def test_qualification_runs_selected_script_for_probe_and_server(tmp_path, monke
             pass
     def popen(command, **kwargs):
         commands.append(command)
+        environments.append(kwargs["env"])
         return Process()
     class Client:
         def __init__(self, **kwargs):
@@ -114,9 +116,20 @@ def test_qualification_runs_selected_script_for_probe_and_server(tmp_path, monke
     monkeypatch.setattr(qualification.httpx, "Client", Client)
     monkeypatch.setattr(qualification, "check_http", lambda *args: {"passed": True})
     monkeypatch.setattr(qualification, "_lifecycle", lifecycle)
+    monkeypatch.setenv("ROUTE_CONTROL_TOKEN", "route-control-secret")
+    monkeypatch.setenv("ROUTE_CONTROL_TOKEN_FILE", "/private/route-token")
+    monkeypatch.setenv("AAP_ROUTE_CONTROL_TOKEN_FILE", "/private/retired-route-token")
+    monkeypatch.setenv("AAP_PLUGIN_TOKEN_FILE", "/private/plugin-token")
+    monkeypatch.setenv("QUALIFICATION_SENTINEL", "kept")
     report = qualification.qualify_local(tmp_path / "fixtures", "cuda:0", "GPU-123",
                                          tmp_path, tmp_path / "report.json", entrypoint="custom-plugin")
     assert [command[:2] for command in commands] == [
         ["/env/bin/custom-plugin", "probe"], ["/env/bin/custom-plugin", "qualification-server"]]
     assert "--device" in commands[1] and "--gpu-uuid" in commands[1]
+    environment = environments[-1]
+    assert "ROUTE_CONTROL_TOKEN" not in environment
+    assert "ROUTE_CONTROL_TOKEN_FILE" not in environment
+    assert "AAP_ROUTE_CONTROL_TOKEN_FILE" not in environment
+    assert "AAP_PLUGIN_TOKEN_FILE" not in environment
+    assert environment["QUALIFICATION_SENTINEL"] == "kept"
     assert not report["platform_managed_qualified"]

@@ -6,8 +6,12 @@ import os
 import secrets
 from pathlib import Path
 
+from yoao_backend_runtime.environment import migrated_value
 from yoao_protocol_v2.backend_auth import BACKEND_SERVICES
 from yoao_protocol_v2.managed_credential import CredentialFileError, read_credential
+
+_BACKEND_AUTH_DIR_ENV = "BACKEND_AUTH_DIR"
+_RETIRED_BACKEND_AUTH_DIR_ENV = "AAP_BACKEND_AUTH_DIR"
 
 
 def manual_credential(provider: str) -> str:
@@ -21,10 +25,13 @@ def backend_credential(provider: str) -> str:
     manual = manual_credential(provider)
     if manual:
         return manual
+    directory = migrated_value(
+        os.environ, _BACKEND_AUTH_DIR_ENV, _RETIRED_BACKEND_AUTH_DIR_ENV
+    )
+    if directory is None:
+        directory = "/run/aap-inference-auth"
     try:
-        return read_credential(
-            Path(os.environ.get("AAP_BACKEND_AUTH_DIR", "/run/aap-inference-auth"))
-        )
+        return read_credential(Path(directory))
     except (OSError, CredentialFileError):
         return ""
 

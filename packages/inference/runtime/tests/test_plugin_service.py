@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from yoao_protocol_v2.routing import ROUTE_STATUS_PATH
 
 from yoao_backend_runtime.plugin_service import install_plugin_service
 
@@ -16,7 +17,9 @@ def test_plugin_auth_rejects_missing_and_incorrect_tokens(tmp_path, monkeypatch)
     monkeypatch.setenv("AAP_PLUGIN_DEVICE", "cpu")
     monkeypatch.setenv("AAP_PLUGIN_REGISTRY_ID", registry)
     monkeypatch.setenv("AAP_ROUTE_REGISTRY_ID", registry)
-    monkeypatch.setenv("AAP_ROUTE_CONTROL_TOKEN_FILE", str(control_file))
+    monkeypatch.setenv("ROUTE_CONTROL_TOKEN_FILE", str(control_file))
+    monkeypatch.delenv("AAP_ROUTE_CONTROL_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("AAP_ROUTE_CONTROL_TOKEN", raising=False)
     monkeypatch.delenv("AAP_ROUTE_ALLOW_LEGACY_EXECUTION", raising=False)
     monkeypatch.delenv("AAP_PLUGIN_GPU_RESOURCE_ID", raising=False)
     monkeypatch.delenv("AAP_PLUGIN_GPU_UUID", raising=False)
@@ -36,7 +39,7 @@ def test_plugin_auth_rejects_missing_and_incorrect_tokens(tmp_path, monkeypatch)
         response = client.get("/setup", headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 200
         assert response.json() == {"service": "plugin"}
-        status = "/v1/aap-routing/status"
+        status = ROUTE_STATUS_PATH
         assert (
             client.get(status, headers={"Authorization": f"Bearer {token}"}).status_code
             == 401

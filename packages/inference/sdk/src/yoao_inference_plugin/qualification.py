@@ -16,9 +16,17 @@ import uuid
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from yoao_protocol_v2.lifecycle import AdmissionScope, AdmissionTokenClaims, encode_ed25519_public_key, sign_admission_token
+from yoao_protocol_v2.lifecycle import (
+    AdmissionScope,
+    AdmissionTokenClaims,
+    GPU_ADMISSION_TOKEN_HEADER,
+    GPU_GENERATION_HEADER,
+    encode_ed25519_public_key,
+    sign_admission_token,
+)
 
 from .check import _data_url, check_http, load_fixtures
+from .child_environment import isolated_provider_environment
 
 
 def _port() -> int:
@@ -54,6 +62,13 @@ def _sign(key, boot, registry, resource, scope, *, generation=None, epoch="2", o
     return sign_admission_token(claims, private_key=key, kid="local")
 
 
+def _admission_headers(token: str, *, generation: str | None = None) -> dict[str, str]:
+    headers = {GPU_ADMISSION_TOKEN_HEADER: token}
+    if generation is not None:
+        headers[GPU_GENERATION_HEADER] = generation
+    return headers
+
+
 async def _lifecycle(url: str, token: str, key, registry: str, resource: str, image: Path) -> dict:
     headers = {"Authorization": "Bearer " + token}
     async with httpx.AsyncClient(base_url=url, headers=headers, timeout=120, trust_env=False) as client:
@@ -61,7 +76,7 @@ async def _lifecycle(url: str, token: str, key, registry: str, resource: str, im
         boot = initial["boot_id"]
         # HTTP fixture checking used legacy execution; signed reset establishes cold ownership.
         reset_token = _sign(key, boot, registry, resource, AdmissionScope.RESET, epoch="1")
-        reset = await client.post("/lifecycle/reset", headers={"X-AAP-GPU-Admission-Token": reset_token}, json={"control_epoch": "1"})
+        reset = await client.post("/lifecycle/reset", headers=_admission_headers(reset_token), json={"control_epoch": "1"})
         reset.raise_for_status()
         exclusive = await client.get("/_local/gpu-exclusivity")
         exclusive.raise_for_status()
@@ -71,13 +86,13 @@ async def _lifecycle(url: str, token: str, key, registry: str, resource: str, im
         baseline_response.raise_for_status()
         baseline = baseline_response.json()
         mode_token = _sign(key, boot, registry, resource, AdmissionScope.MODE)
-        mode = await client.post("/lifecycle/mode", headers={"X-AAP-GPU-Admission-Token": mode_token}, json={"gate": "enforce", "control_epoch": "2"})
+        mode = await client.post("/lifecycle/mode", headers=_admission_headers(mode_token), json={"gate": "enforce", "control_epoch": "2"})
         mode.raise_for_status()
         source = _data_url(image)
         if len(source) > 3 * 1024 * 1024:
             raise ValueError("local cancellation fixture must be at most 2 MiB; use a smaller representative image")
         tasks = [{"id": i, "file_path": source} for i in range(16)]
-        prediction_headers = {"X-AAP-GPU-Generation": "1", "X-AAP-GPU-Admission-Token": _sign(key, boot, registry, resource, AdmissionScope.PREDICT, generation="1")}
+        prediction_headers = _admission_headers(_sign(key, boot, registry, resource, AdmissionScope.PREDICT, generation="1"), generation="1")
         prediction = asyncio.create_task(client.post("/predict", headers=prediction_headers, json={"tasks": tasks, "context": {"task": "detect"}}))
         try:
             deadline = time.monotonic() + 90
@@ -98,13 +113,13 @@ async def _lifecycle(url: str, token: str, key, registry: str, resource: str, im
             except asyncio.CancelledError:
                 pass
             drain_token = _sign(key, boot, registry, resource, AdmissionScope.DRAIN, generation="2")
-            drain_headers = {"X-AAP-GPU-Generation": "2", "X-AAP-GPU-Admission-Token": drain_token}
+            drain_headers = _admission_headers(drain_token, generation="2")
             drain = await client.post("/drain", headers=drain_headers, json={"generation": "2"})
             drain.raise_for_status()
             live = drain.json()
             if live.get("ready_to_unload") is not False or live.get("active_requests", 0) < 1:
                 raise ValueError("drain did not observe active native work after cancellation; repeat with a slower fixture")
-            denied = await client.post("/warmup", headers={"X-AAP-GPU-Generation": "2", "X-AAP-GPU-Admission-Token": _sign(key, boot, registry, resource, AdmissionScope.WARMUP, generation="2")}, json={"task": "detect"})
+            denied = await client.post("/warmup", headers=_admission_headers(_sign(key, boot, registry, resource, AdmissionScope.WARMUP, generation="2"), generation="2"), json={"task": "detect"})
             if denied.status_code < 400:
                 raise ValueError("draining service admitted a new workload")
             deadline = time.monotonic() + 120
@@ -117,7 +132,7 @@ async def _lifecycle(url: str, token: str, key, registry: str, resource: str, im
             else:
                 raise ValueError("native inference did not exit after cancellation; backend remains draining")
             unload_token = _sign(key, boot, registry, resource, AdmissionScope.UNLOAD, generation="2")
-            unloaded = await client.post("/unload", headers={"X-AAP-GPU-Generation": "2", "X-AAP-GPU-Admission-Token": unload_token}, json={"generation": "2"})
+            unloaded = await client.post("/unload", headers=_admission_headers(unload_token, generation="2"), json={"generation": "2"})
             unloaded.raise_for_status()
             cold = (await client.get("/health")).json()["residency"]
             if cold.get("gpu_loaded") is not False or cold.get("pools", {}).get("models", {}).get("resident") is not False or cold.get("active_requests") != 0:
@@ -182,7 +197,7 @@ def qualify_local(fixtures: Path, device: str, gpu_uuid: str, asset_dir: Path, r
                    "--gpu-uuid", gpu_uuid, "--asset-dir", str(asset_dir), "--token-file", str(token_file),
                    "--keyring-file", str(keyring), "--registry", registry, "--resource", resource, "--port", str(port)]
         with (root / "server.log").open("w+") as log:
-            environment = {k: v for k, v in os.environ.items() if not k.startswith(("AAP_ROUTE_", "AAP_PLUGIN_"))}
+            environment = isolated_provider_environment(os.environ)
             process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True, env=environment)
             try:
                 deadline = time.monotonic() + 60

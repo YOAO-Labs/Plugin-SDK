@@ -7,6 +7,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from yoao_inference_plugin import DetectionConfig, create_detection_app
+from yoao_protocol_v2.lifecycle import (
+    AdmissionScope,
+    GPU_ADMISSION_TOKEN_HEADER,
+    GPU_GENERATION_HEADER,
+)
 from test_detection_app import Model, Provider, TOKEN, image_url
 
 
@@ -193,7 +198,6 @@ def test_unqualified_bound_cuda_advertises_only_signed_terminal_control():
 
 
 def test_cuda_terminal_drain_requires_and_consumes_signed_gpu_authority():
-    from yoao_protocol_v2.lifecycle import AdmissionScope
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from yoao_inference_plugin.qualification import _sign
 
@@ -239,8 +243,8 @@ def test_cuda_terminal_drain_requires_and_consumes_signed_gpu_authority():
             client.post(
                 "/warmup",
                 headers={
-                    "X-AAP-GPU-Generation": "1",
-                    "X-AAP-GPU-Admission-Token": premature,
+                    GPU_GENERATION_HEADER: "1",
+                    GPU_ADMISSION_TOKEN_HEADER: premature,
                 },
                 json={"task": "detect"},
             ).status_code
@@ -251,12 +255,14 @@ def test_cuda_terminal_drain_requires_and_consumes_signed_gpu_authority():
         assert (
             client.post(
                 "/lifecycle/mode",
-                headers={"X-AAP-GPU-Admission-Token": mode},
+                headers={GPU_ADMISSION_TOKEN_HEADER: mode},
                 json={"gate": "enforce", "control_epoch": "2"},
             ).status_code
             == 200
         )
-        warm = _sign(
+        # A canonically signed token under the retired AAP header names is not an
+        # admission: only the contract header names select lifecycle authority.
+        retired = _sign(
             key, boot, registry, resource, AdmissionScope.WARMUP, generation="1"
         )
         assert (
@@ -264,7 +270,22 @@ def test_cuda_terminal_drain_requires_and_consumes_signed_gpu_authority():
                 "/warmup",
                 headers={
                     "X-AAP-GPU-Generation": "1",
-                    "X-AAP-GPU-Admission-Token": warm,
+                    "X-AAP-GPU-Admission-Token": retired,
+                },
+                json={"task": "detect"},
+            ).status_code
+            == 403
+        )
+        assert provider.models == []
+        warm = _sign(
+            key, boot, registry, resource, AdmissionScope.WARMUP, generation="1"
+        )
+        assert (
+            client.post(
+                "/warmup",
+                headers={
+                    GPU_GENERATION_HEADER: "1",
+                    GPU_ADMISSION_TOKEN_HEADER: warm,
                 },
                 json={"task": "detect"},
             ).status_code
@@ -279,7 +300,7 @@ def test_cuda_terminal_drain_requires_and_consumes_signed_gpu_authority():
         )
         response = client.post(
             "/lifecycle/terminal-drain-signed",
-            headers={"X-AAP-GPU-Generation": "2", "X-AAP-GPU-Admission-Token": drain},
+            headers={GPU_GENERATION_HEADER: "2", GPU_ADMISSION_TOKEN_HEADER: drain},
             json={"generation": "2"},
         )
         assert response.status_code == 200
@@ -294,8 +315,8 @@ def test_cuda_terminal_drain_requires_and_consumes_signed_gpu_authority():
             client.post(
                 "/warmup",
                 headers={
-                    "X-AAP-GPU-Generation": "3",
-                    "X-AAP-GPU-Admission-Token": later,
+                    GPU_GENERATION_HEADER: "3",
+                    GPU_ADMISSION_TOKEN_HEADER: later,
                 },
                 json={"task": "detect"},
             ).status_code

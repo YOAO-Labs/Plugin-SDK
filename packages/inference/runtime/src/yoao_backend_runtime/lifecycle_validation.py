@@ -7,9 +7,10 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
-
-GPU_GENERATION_HEADER = "X-AAP-GPU-Generation"
-GPU_ADMISSION_TOKEN_HEADER = "X-AAP-GPU-Admission-Token"
+from yoao_protocol_v2.lifecycle import (
+    GPU_ADMISSION_TOKEN_HEADER,
+    GPU_GENERATION_HEADER,
+)
 
 
 async def exercise_lifecycle_fault_matrix(

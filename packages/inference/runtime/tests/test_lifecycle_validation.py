@@ -3,7 +3,22 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from yoao_backend_runtime.lifecycle_validation import exercise_lifecycle_fault_matrix
+from yoao_backend_runtime.lifecycle_validation import (
+    GPU_ADMISSION_TOKEN_HEADER,
+    GPU_GENERATION_HEADER,
+    exercise_lifecycle_fault_matrix,
+)
+from yoao_protocol_v2.lifecycle import (
+    GPU_ADMISSION_TOKEN_HEADER as CONTRACT_ADMISSION_HEADER,
+    GPU_GENERATION_HEADER as CONTRACT_GENERATION_HEADER,
+)
+
+
+def test_fault_probe_uses_canonical_gpu_headers() -> None:
+    assert GPU_GENERATION_HEADER is CONTRACT_GENERATION_HEADER
+    assert GPU_ADMISSION_TOKEN_HEADER is CONTRACT_ADMISSION_HEADER
+    assert GPU_GENERATION_HEADER == "X-YOAO-GPU-Generation"
+    assert GPU_ADMISSION_TOKEN_HEADER == "X-YOAO-GPU-Admission-Token"
 
 
 class _Response:
@@ -49,8 +64,8 @@ class _Client:
         self.seen_tokens = set()
 
     async def post(self, path, *, json, headers):
-        token = headers.get("X-AAP-GPU-Admission-Token")
-        generation = headers.get("X-AAP-GPU-Generation")
+        token = headers.get(GPU_ADMISSION_TOKEN_HEADER)
+        generation = headers.get(GPU_GENERATION_HEADER)
         if path == "/drain":
             return _Response(200)
         if path == "/unload":

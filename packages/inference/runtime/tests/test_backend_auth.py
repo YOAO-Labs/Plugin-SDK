@@ -13,7 +13,8 @@ def test_every_service_protects_business_and_handshake_but_keeps_health_public(
 ):
     monkeypatch.delenv("AAP_BACKEND_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("YOLO_MANAGED_MODELS_TOKEN", raising=False)
-    monkeypatch.setenv("AAP_BACKEND_AUTH_DIR", str(tmp_path / provider))
+    monkeypatch.delenv("AAP_BACKEND_AUTH_DIR", raising=False)
+    monkeypatch.setenv("BACKEND_AUTH_DIR", str(tmp_path / provider))
     app = FastAPI()
     install_backend_auth(app, provider)
     for path in ("/health", "/metrics", "/setup", "/predict", "/control/test"):
@@ -52,7 +53,8 @@ def test_manual_token_always_takes_precedence_without_changing_private_file(
 ):
     directory = tmp_path / provider
     token = ensure_credential(directory)
-    monkeypatch.setenv("AAP_BACKEND_AUTH_DIR", str(directory))
+    monkeypatch.setenv("BACKEND_AUTH_DIR", str(directory))
+    monkeypatch.delenv("AAP_BACKEND_AUTH_DIR", raising=False)
     monkeypatch.setenv("AAP_BACKEND_AUTH_TOKEN", "m" * 64)
     monkeypatch.delenv("YOLO_MANAGED_MODELS_TOKEN", raising=False)
     app = FastAPI()
@@ -82,6 +84,33 @@ def test_manual_token_always_takes_precedence_without_changing_private_file(
                 == 200
             )
     assert (directory / "token").read_text().strip() == token
+
+
+def test_retired_backend_auth_dir_is_refused_without_its_value(monkeypatch, tmp_path):
+    from yoao_backend_runtime.backend_auth import backend_credential
+
+    retired = tmp_path / "retired-credentials"
+    monkeypatch.delenv("AAP_BACKEND_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("YOLO_MANAGED_MODELS_TOKEN", raising=False)
+    monkeypatch.delenv("BACKEND_AUTH_DIR", raising=False)
+    monkeypatch.setenv("AAP_BACKEND_AUTH_DIR", str(retired))
+    with pytest.raises(RuntimeError, match="AAP_BACKEND_AUTH_DIR") as error:
+        backend_credential("yolo")
+    assert str(retired) not in str(error.value)
+
+
+def test_ambiguous_backend_auth_dirs_are_refused_without_values(monkeypatch, tmp_path):
+    from yoao_backend_runtime.backend_auth import backend_credential
+
+    current, retired = tmp_path / "current", tmp_path / "retired"
+    monkeypatch.delenv("AAP_BACKEND_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("YOLO_MANAGED_MODELS_TOKEN", raising=False)
+    monkeypatch.setenv("BACKEND_AUTH_DIR", str(current))
+    monkeypatch.setenv("AAP_BACKEND_AUTH_DIR", str(retired))
+    with pytest.raises(RuntimeError, match="both set") as error:
+        backend_credential("yolo")
+    assert str(current) not in str(error.value)
+    assert str(retired) not in str(error.value)
 
 
 @pytest.mark.parametrize(

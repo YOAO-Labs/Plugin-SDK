@@ -57,8 +57,8 @@ The initial SDK extraction is SDK commit `182d20dd0d84abe864d44fdb29d89dcf8de375
 
 ```sh
 python -m pip install build 'setuptools>=68' wheel
-python scripts/build-sdk-artifacts.py --revision HEAD --output /tmp/aap-sdk-release
-(cd /tmp/aap-sdk-release && sha256sum -c SHA256SUMS)
+python scripts/build-sdk-artifacts.py --revision HEAD --output /tmp/yoao-sdk-release
+(cd /tmp/yoao-sdk-release && sha256sum -c SHA256SUMS)
 ```
 
 The output contains a source tar archive, wheel and sdist for each of the three packages, `manifest.json` with exact source repository/revision, builder versions and artifact SHA-256 hashes, and `SHA256SUMS` (including the manifest). The source archive is restricted to the three SDK package trees and root license/readme. It does not distribute platform source, official plugin implementations, model catalogs, native loaders or model weights. The repository owns publication separately; a local build does not publish anything.

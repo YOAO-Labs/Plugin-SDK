@@ -5,7 +5,11 @@ from fastapi.testclient import TestClient
 
 from yoao_inference_plugin import DetectionConfig, create_detection_app
 from yoao_inference_plugin.qualification import _sign
-from yoao_protocol_v2.lifecycle import AdmissionScope
+from yoao_protocol_v2.lifecycle import (
+    AdmissionScope,
+    GPU_ADMISSION_TOKEN_HEADER,
+    GPU_GENERATION_HEADER,
+)
 from test_detection_app import TOKEN, image_url
 from test_managed_models import IDENTITY, Install, Provider, Store, VERSION
 
@@ -47,7 +51,7 @@ def test_absent_historical_runtime_is_not_upgraded_to_cuda():
         assert (
             client.post(
                 "/lifecycle/mode",
-                headers={"X-AAP-GPU-Admission-Token": mode},
+                headers={GPU_ADMISSION_TOKEN_HEADER: mode},
                 json={"gate": "enforce", "control_epoch": "2"},
             ).status_code
             == 200
@@ -67,8 +71,8 @@ def test_absent_historical_runtime_is_not_upgraded_to_cuda():
             "/predict",
             json=body,
             headers={
-                "X-AAP-GPU-Generation": "1",
-                "X-AAP-GPU-Admission-Token": admission,
+                GPU_GENERATION_HEADER: "1",
+                GPU_ADMISSION_TOKEN_HEADER: admission,
             },
         )
         assert response.status_code == 409

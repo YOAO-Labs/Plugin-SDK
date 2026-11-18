@@ -154,7 +154,7 @@ def test_single_gpu_device_set_checks_every_runtime_visibility_layer() -> None:
         ),
         (
             {
-                "AAP_GPU_PHYSICAL_DEVICE_TOKEN": "index:1",
+                "GPU_PHYSICAL_DEVICE_TOKEN": "index:1",
                 "NVIDIA_VISIBLE_DEVICES": "void",
                 "CUDA_VISIBLE_DEVICES": "0",
             },
@@ -171,8 +171,25 @@ def test_physical_gpu_identity_prefers_container_runtime_selection(
 
 @pytest.mark.parametrize("value", ["", " all", "all", "0,1", "index:x"])
 def test_explicit_physical_gpu_token_is_strict(value: str) -> None:
-    with pytest.raises(RuntimeError, match="AAP_GPU_PHYSICAL_DEVICE_TOKEN"):
-        physical_gpu_identity({"AAP_GPU_PHYSICAL_DEVICE_TOKEN": value})
+    with pytest.raises(RuntimeError, match="GPU_PHYSICAL_DEVICE_TOKEN"):
+        physical_gpu_identity({"GPU_PHYSICAL_DEVICE_TOKEN": value})
+
+
+def test_retired_physical_gpu_token_is_refused_without_its_value() -> None:
+    with pytest.raises(RuntimeError, match="AAP_GPU_PHYSICAL_DEVICE_TOKEN") as error:
+        physical_gpu_identity({"AAP_GPU_PHYSICAL_DEVICE_TOKEN": "index:7"})
+    assert "index:7" not in str(error.value)
+
+
+def test_ambiguous_physical_gpu_token_names_are_refused_without_values() -> None:
+    environ = {
+        "GPU_PHYSICAL_DEVICE_TOKEN": "index:1",
+        "AAP_GPU_PHYSICAL_DEVICE_TOKEN": "index:7",
+    }
+    with pytest.raises(RuntimeError, match="both set") as error:
+        physical_gpu_identity(environ)
+    assert "index:1" not in str(error.value)
+    assert "index:7" not in str(error.value)
 
 
 def test_observed_gpu_requires_exact_single_physical_identity(monkeypatch) -> None:

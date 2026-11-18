@@ -28,11 +28,25 @@ def bind_route(client, registry):
 
 
 def test_cpu_terminal_path_bypasses_only_routing_not_bearer(monkeypatch):
-    monkeypatch.setenv("AAP_ROUTE_CONTROL_TOKEN", ROUTE_TOKEN)
+    monkeypatch.setenv("ROUTE_CONTROL_TOKEN", ROUTE_TOKEN)
+    monkeypatch.delenv("AAP_ROUTE_CONTROL_TOKEN", raising=False)
     registry = str(uuid4())
     config = DetectionConfig(token=TOKEN, device="cpu", catalog={"t": {}}, default_model="t", expected_registry_id=registry)
     with TestClient(create_detection_app(Provider(), config)) as client:
         bind_route(client, registry)
+        # Retired control entry points are not aliases: both fall through to
+        # normal route admission instead of acting as management endpoints.
+        legacy_control = client.post(
+            "/v1/aap-routing/control",
+            headers={"Authorization": "Bearer " + ROUTE_TOKEN},
+            json={},
+        )
+        assert legacy_control.status_code in (401, 503)
+        legacy_status = client.get(
+            "/v1/aap-routing/status",
+            headers={"Authorization": "Bearer " + ROUTE_TOKEN},
+        )
+        assert legacy_status.status_code in (401, 503)
         boot = client.get("/health").json()["residency"]["boot_id"]
         body = {"registry_id": registry, "boot_id": boot, "operation_id": "stop"}
         wrong = client.post("/lifecycle/terminal-drain", headers={"Authorization": "Bearer " + "z" * 32}, json=body)
@@ -46,7 +60,8 @@ def test_cpu_terminal_path_bypasses_only_routing_not_bearer(monkeypatch):
 
 
 def test_gpu_terminal_path_requires_bearer_and_gpu_signature_with_routing_bound(monkeypatch):
-    monkeypatch.setenv("AAP_ROUTE_CONTROL_TOKEN", ROUTE_TOKEN)
+    monkeypatch.setenv("ROUTE_CONTROL_TOKEN", ROUTE_TOKEN)
+    monkeypatch.delenv("AAP_ROUTE_CONTROL_TOKEN", raising=False)
     registry = str(uuid4())
     config = DetectionConfig(token=TOKEN, device="cuda:0", physical_gpu_uuid="GPU-123",
                              catalog={"t": {}}, default_model="t", expected_registry_id=registry)

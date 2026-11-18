@@ -13,6 +13,8 @@ import subprocess
 from collections.abc import Mapping
 from typing import Any
 
+from yoao_backend_runtime.environment import migrated_value
+
 
 _VISIBLE_DEVICE_ENV_NAMES = (
     "NVIDIA_VISIBLE_DEVICES",
@@ -23,7 +25,14 @@ _VISIBLE_DEVICE_ENV_NAMES = (
 )
 _NO_DEVICE_VALUES = {"", "-1", "none", "void"}
 _NVIDIA_ALL_DEVICE_VALUES = {"all", "nvidia.com/gpu=all"}
-_PHYSICAL_DEVICE_TOKEN_ENV_NAME = "AAP_GPU_PHYSICAL_DEVICE_TOKEN"
+_PHYSICAL_DEVICE_TOKEN_ENV_NAME = "GPU_PHYSICAL_DEVICE_TOKEN"
+_RETIRED_PHYSICAL_DEVICE_TOKEN_ENV_NAME = "AAP_GPU_PHYSICAL_DEVICE_TOKEN"
+
+
+def _physical_device_token(values: Mapping[str, str]) -> str | None:
+    return migrated_value(
+        values, _PHYSICAL_DEVICE_TOKEN_ENV_NAME, _RETIRED_PHYSICAL_DEVICE_TOKEN_ENV_NAME
+    )
 
 
 def _physical_identity_from_token(
@@ -96,7 +105,7 @@ def validate_single_gpu_device_set(
                 f"{name} must select at most one GPU/MIG device; "
                 "multi-device sets are unsupported"
             )
-    explicit_physical_token = values.get(_PHYSICAL_DEVICE_TOKEN_ENV_NAME)
+    explicit_physical_token = _physical_device_token(values)
     if explicit_physical_token is not None:
         _physical_identity_from_token(
             explicit_physical_token,
@@ -117,7 +126,7 @@ def physical_gpu_identity(
 
     values = os.environ if environ is None else environ
     validate_single_gpu_device_set(values)
-    explicit_physical_token = values.get(_PHYSICAL_DEVICE_TOKEN_ENV_NAME)
+    explicit_physical_token = _physical_device_token(values)
     if explicit_physical_token is not None:
         return _physical_identity_from_token(
             explicit_physical_token,
