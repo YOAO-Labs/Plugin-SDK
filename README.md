@@ -1,6 +1,6 @@
-# Plugin SDK
+# YOAO Plugin SDK
 
-This repository publishes capability-scoped SDKs for independent plugin authors; it is not the platform or a distribution of official plugins. [YOAO-Plugins](https://github.com/YOAO-Labs/YOAO-Plugins) owns official implementations and their model-specific assets. The [platform](https://github.com/YOAO-Labs/ai-annotation-platform) owns API SDKs, portable contract **source**, authorization, storage and governance; the SDK consumes published contracts rather than duplicating platform rules.
+YOAO stands for **You Only Annotate Once**. This repository maintains tools for authors of independent inference plugins. Use `yoao-plugin` to develop a plugin; `yoao plugins` belongs to the separate [platform API client](https://github.com/YOAO-Labs/ai-annotation-platform) and manages installations. The platform owns the portable contracts, authorization and storage. [YOAO-Plugins](https://github.com/YOAO-Labs/YOAO-Plugins) maintains the six official implementations and their model-specific asset catalogs.
 
 | Path | Python distribution | Purpose |
 | --- | --- | --- |
@@ -39,7 +39,7 @@ python -m pytest packages/inference/sdk/tests
 python -m pytest packages/inference/mask-utils/tests
 ```
 
-For author commands and their arguments, use `yoao-plugin --help`, `yoao-plugin build --help`, and `yoao-plugin check --help`. `yoao-plugin build /path/to/your-plugin` builds a wheel. HTTP checks require a running service and fixture data; GPU qualification requires explicit exclusive hardware and evidence. Neither a successful wheel build nor an HTTP check grants platform-managed qualification or permission to redistribute models. See the inference SDK package documentation for author workflow and provider requirements.
+For the [detection author workflow](packages/inference/sdk/README.md), use the documentation from the `source_revision` in your verified SDK manifest and `yoao-plugin --help` from the installed wheel. The public historical `aap-inference-plugin` CLI and its templates are not substitutes for this candidate. A wheel build or HTTP check does not qualify managed GPU use or authorize model redistribution.
 
 ## Stateful tracker sessions
 

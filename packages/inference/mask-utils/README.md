@@ -1,8 +1,6 @@
 # yoao-mask-utils
 
-共享的 mask → polygon 工具包。被以下 backend 复用：
-
-- 平台的 grounded-sam2 和 sam3 backend。
+`yoao-mask-utils` 提供共享的 mask → polygon 转换，Python 导入名是 `mask_utils`。[YOAO-Plugins](https://github.com/YOAO-Labs/YOAO-Plugins) 仓库维护的 Grounded-SAM2 和 SAM3 官方推理插件复用这个包；模型实现不在 SDK 或平台仓库中。
 
 ## 安装（开发模式）
 

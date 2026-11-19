@@ -216,7 +216,7 @@ def main() -> None:
     build = commands.add_parser("build")
     build.add_argument("directory", nargs="?", type=Path, default=Path.cwd())
     build.add_argument(
-        "--base-image", help="Digest-pinned base image for an offline image build"
+        "--base-image", help="Digest-pinned base image; pip installs offline, APT uses its configured repositories"
     )
     build.add_argument("--wheelhouse", type=Path)
     build.add_argument("--requirements-lock", type=Path)

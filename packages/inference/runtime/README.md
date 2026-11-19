@@ -2,7 +2,7 @@
 
 ML backend 运行时共享组件（无状态叶子函数、取消安全的 LRU 池与会话所有权内核）。单一来源，避免跨 backend 复制漂移。
 
-由平台 backend 通过固定的公开 Python 制品复用；契约包仍由平台拥有。
+官方及自定义推理插件可复用此运行时；平台拥有它依赖的推理协议和生命周期契约。按[仓库制品说明](../../../README.md#portable-contracts-and-local-development)获取与宿主匹配的候选 wheel 并核验摘要，不要用公开旧版契约替代。
 
 ## 边界
 
@@ -86,7 +86,7 @@ terminal_cpu_enabled=False, allow_legacy_workloads=True)` — 签名控制、gen
 
 ## 依赖说明
 
-- `httpx` / `pillow` 仅 `fetch_image` 用, 函数内惰性 import (纯 `versions_payload` 消费方无需装)。
+- `httpx` 和 `Pillow` 是 wheel 声明的安装依赖。即使只调用 `versions_payload`，正常安装也会安装两者；调用该函数本身不读取网络或图像。
 - `torch` **不在依赖里**: 各 backend 的 torch / torchvision 由 docker base image 锁定, 在此声明会让
   `pip install -e` 误升级覆盖预装版本。`free_gpu_memory` / `gpu_info_snapshot` 把 `import torch` 包在
   try 里, 不可用时降级。
