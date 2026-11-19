@@ -2,9 +2,9 @@
 
 实现：cv2.findContours 取前景轮廓 → shapely.simplify 简化顶点 → 可选归一化。
 
-v0.9.14 · 新增 mask_to_multi_polygon（RETR_CCOMP 抓内外环树, 输出 list[{exterior,
-holes}]）支持多连通域 + 空洞。原 mask_to_polygon 保留不动, predictor 在单连通无 hole
-时仍走旧路径以保持向后兼容（老前端 / 老存量 prediction 反序列化路径不破）。
+mask_to_polygon 只返回面积最大的外环；mask_to_multi_polygon 使用 RETR_CCOMP
+识别多个外环及其空洞，返回 [{exterior, holes}, ...]。推理插件使用 points
+字段表示无空洞的单环，以兼容只读取该字段的消费者。
 """
 
 from __future__ import annotations
@@ -180,8 +180,8 @@ def mask_to_preview_polygon(
 def _simplify_contour(contour: np.ndarray, tolerance: float) -> list[list[float]]:
     """单条 cv2 contour → 简化后的 [[x,y], ...]（像素坐标）；失败降级到原始顶点。
 
-    与 mask_to_polygon 旧实现一致的拓扑兜底（self-intersecting / spike contour /
-    buffer(0) 切碎成 MultiPolygon 时取最大者）, 保证非空 contour 一定返回顶点。
+    自相交轮廓先用 buffer(0) 修复；简化后若得到 MultiPolygon，取面积最大者。
+    简化抛出异常或得到非多边形时回退到原始顶点；空或退化轮廓返回 []。
     """
     if len(contour) < 3:
         return []

@@ -44,10 +44,9 @@ poly_norm = mask_to_polygon(mask, tolerance=1.0, normalize_to=(512, 512))
 - `tolerance`：`shapely.simplify` 容差（像素单位），越大顶点越少；典型 0.5-2.0
 - `normalize_to`：`(W, H)` 元组；为 `None` 返回像素坐标，否则坐标归一化到 `[0, 1]`
 
-返回最大连通域的多边形 `[[x1, y1], [x2, y2], ...]`；空 mask 返回 `[]`。
+返回面积最大的外环 `[[x1, y1], [x2, y2], ...]`，不保留其他连通域或空洞；空 mask 返回 `[]`。需要保留多个连通域或空洞时，使用 `mask_to_multi_polygon`，它返回 `[{exterior, holes}, ...]`。
 
 ## 性能 / 边界
 
 - O(N) findContours + O(N log N) simplify；512×512 mask < 5ms
-- 多连通域只取面积最大者（v0.9.x 业务约定每实例只一个多边形）
-- tolerance 过大时可能简化为线段（< 4 顶点），调用方应判断 `len(poly) >= 3`
+- 空或退化轮廓可能不产生多边形；调用方应确认 `len(poly) >= 3` 后再使用结果

@@ -1,10 +1,10 @@
-"""mask_to_multi_polygon 单测：donut / 两圆 / 单连通退化路径 × IoU 验证。
+"""mask_to_multi_polygon 的多连通域、空洞及 IoU 测试。
 
-v0.9.14 · ROADMAP P2 多连通域 / 空洞支持。覆盖：
-- 单连通无 hole（与 mask_to_polygon 同结果, 但包成 [{exterior, holes:[]}]）
+覆盖：
+- 无空洞的单连通域（一个 exterior，holes 为空）
 - 甜甜圈（1 外环 + 1 hole）
 - 两个分离圆（2 外环, 各无 hole）
-- 空 mask / size=0 / 全噪点
+- 空 mask 与零尺寸输入
 - 归一化 [0,1] 输出
 - min_area 过滤小噪点 hole
 """

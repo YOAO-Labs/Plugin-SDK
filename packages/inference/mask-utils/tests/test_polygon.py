@@ -70,7 +70,7 @@ def test_bool_mask_supported():
 
 
 def test_normalized_coords_rounded_to_6_decimals():
-    """v0.9.4 phase 3 — 归一化输出与 predictor.py 旧 inline 实现一致 6 位精度。"""
+    """归一化坐标与协议精度对齐，最多保留 6 位小数。"""
     mask = circle_mask(size=300, radius=70)
     poly = mask_to_polygon(mask, tolerance=1.0, normalize_to=(300, 300))
 
@@ -83,7 +83,7 @@ def test_normalized_coords_rounded_to_6_decimals():
 
 
 def test_self_intersecting_contour_falls_back_to_raw_coords():
-    """v0.9.4 phase 3 — shapely simplify 拓扑失败时降级到原始 contour, 不返回空。
+    """Shapely 简化遇到拓扑异常时回退到原始轮廓，不丢弃多边形。
 
     构造一个 8 字形 mask: 两个相邻矩形通过单像素桥连接, findContours 沿外环走时形成
     自相交细颈, shapely.is_valid → False, buffer(0) 可能切成 MultiPolygon, simplify

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-# v0.9.4 phase 3: 6 位小数与平台 BboxAnnotation / PolygonAnnotation value 字段精度对齐
-# (predictor.py 旧 inline 实现也是 round(x/w, 6))，避免迁移后协议字段分辨率漂移。
+# 统一保留 6 位小数，与平台 BboxAnnotation / PolygonAnnotation 的 value 字段精度对齐。
 _NORM_PRECISION = 6
 
 

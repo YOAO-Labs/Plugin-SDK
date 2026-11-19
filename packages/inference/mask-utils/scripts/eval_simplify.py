@@ -37,10 +37,9 @@ def _polygon_iou(poly_pixel_coords: list[list[float]], mask: np.ndarray) -> floa
 
 
 def _multi_polygon_iou(rings: list[dict], mask: np.ndarray) -> float:
-    """v0.9.14 · 多连通域 polygons (含 hole) 重栅格化 → 与原 mask 的 IoU.
+    """将含内外环的多边形重栅格化，计算与原 mask 的 IoU。
 
-    每个外环 fillPoly 1, 内部 holes fillPoly 0; 多连通域多个外环全部累加.
-    评测 mask_to_multi_polygon 在长尾样本上比 mask_to_polygon 提升多少.
+    将各外环填为 1、各空洞填为 0，以评测多连通域和空洞的保真度。
     """
     if not rings:
         return 0.0
@@ -76,7 +75,7 @@ def _eval_dir(
     rows: list[dict] = []
     per_tol_iou: dict[float, list[float]] = {t: [] for t in tolerances}
     per_tol_verts: dict[float, list[int]] = {t: [] for t in tolerances}
-    # v0.9.14 · 同时跑 mask_to_multi_polygon, 评测多连通域 / hole 升级在长尾样本上的提升
+    # 使用相同的容差比较单外环和多连通域两种转换。
     per_tol_iou_multi: dict[float, list[float]] = {t: [] for t in tolerances}
     per_tol_verts_multi: dict[float, list[int]] = {t: [] for t in tolerances}
     per_tol_rings_multi: dict[float, list[int]] = {t: [] for t in tolerances}
@@ -166,10 +165,10 @@ def _render_markdown(
     masks_dir: Path,
 ) -> str:
     lines: list[str] = []
-    lines.append("# 13 · mask→polygon simplify tolerance 评测")
+    lines.append("# 掩码转多边形：简化容差与保真度评测")
     lines.append("")
     lines.append(
-        f"> v0.9.4 phase 3 · `scripts/eval_simplify.py` 自动生成于 "
+        "> `scripts/eval_simplify.py` 自动生成于 "
         f"{datetime.now().strftime('%Y-%m-%d %H:%M')}; 输入 `{masks_dir}` ({len(rows)} samples)。"
     )
     lines.append("")
@@ -177,13 +176,13 @@ def _render_markdown(
     lines.append("")
     sample_names = [r["file"] for r in rows]
     n_synth = sum(1 for n in sample_names if n.startswith("synthetic_"))
-    n_real = len(sample_names) - n_synth
+    n_other = len(sample_names) - n_synth
     lines.append(
-        f"样本组成: **{n_real} 张真实 SAM mask + {n_synth} 张合成 mask**。"
-        "合成 mask 形状规则, IoU 偏高; 真实 SAM mask 边界更复杂, 数据替换后请重跑此脚本。"
+        f"按文件名分类：**{n_synth} 张以 `synthetic_` 开头，{n_other} 张其他样本**。"
+        "合成样本与实际掩码的边界复杂度可能不同；更换样本后应重新评测。"
     )
     lines.append("")
-    lines.append("## 汇总 (per tolerance) — 单 polygon (v0.9.13 之前)")
+    lines.append("## `mask_to_polygon`：按容差汇总最大外环的结果")
     lines.append("")
     lines.append(
         "| tolerance (px) | n | IoU mean | IoU median | IoU p95 | IoU≥0.95 % | verts mean | verts median | verts p95 |"
@@ -197,16 +196,16 @@ def _render_markdown(
             f"{s['verts']['median']} | {s['verts']['p95']} |"
         )
     lines.append("")
-    lines.append("## v0.9.14 · 多连通域 / 空洞升级评测")
+    lines.append("## `mask_to_multi_polygon`：按容差汇总多连通域与空洞的结果")
     lines.append("")
     lines.append(
-        "`mask_to_multi_polygon` (RETR_CCOMP) 在同 tolerance 下与 `mask_to_polygon` "
-        "(RETR_EXTERNAL + max area) 的 IoU 对比。`multi_only_helps %` 列 = 升级使 IoU 提升 ≥ 0.02 的样本占比，"
-        "这部分样本是「多连通 / 带空洞」的长尾根因。"
+        "`mask_to_multi_polygon` (`RETR_CCOMP`) 与 `mask_to_polygon` "
+        "(`RETR_EXTERNAL`，只取最大外环) 使用相同的容差。`outer rings median` 是外环数量的中位数；"
+        "`multi_only_helps %` 是前者的 IoU 比后者高至少 0.02 的样本占比。"
     )
     lines.append("")
     lines.append(
-        "| tolerance | IoU mean | IoU median | IoU≥0.95 % | rings median | multi_only_helps % |"
+        "| tolerance | IoU mean | IoU median | IoU≥0.95 % | outer rings median | multi_only_helps % |"
     )
     lines.append("|---|---|---|---|---|---|")
     for tol in tolerances:
@@ -217,91 +216,87 @@ def _render_markdown(
             f"{s['multi_only_helps_pct']} |"
         )
     lines.append("")
-    lines.append("## 数据驱动结论")
+    lines.append("## `mask_to_polygon` 的简化容差分析")
     lines.append("")
     # IoU≥0.95 占比按 tolerance 看; 取 1.0 档作主参考 (默认值).
     primary_tol = 1.0 if 1.0 in summary else tolerances[0]
     iou95 = summary[primary_tol]["iou>=0.95_pct"]
     iou_mean = summary[primary_tol]["iou"]["mean"]
     verts_med = summary[primary_tol]["verts"]["median"]
-    # 三档判定:
+    # 四档判定:
     # ① ≥95%: 完全达标
-    # ② 85% ≤ x < 95% 且 IoU mean ≥ 0.95: 近达标 (大头能用, 长尾少数 mask 边界复杂)
-    # ③ < 85% 且 IoU spread < 0.05: 结构性根因 (调 tolerance 没用)
-    # ④ 其它: 调 tolerance 有意义, 推荐最优档
+    # ② 85% ≤ x < 95% 且 IoU mean ≥ 0.95: 接近验收线
+    # ③ 其余未达标样本，IoU spread < 0.05: 调整容差的收益有限
+    # ④ 其余未达标样本，IoU spread ≥ 0.05: 推荐达标率最高的容差
     if iou95 >= 95.0:
         lines.append(
-            f"**`DEFAULT_SIMPLIFY_TOLERANCE = {primary_tol}` 在当前样本满足验收线** "
+            "**`mask_to_polygon` 在当前样本满足验收线** "
             f"（tolerance={primary_tol} IoU≥0.95 占比 {iou95}%、IoU mean {iou_mean}、"
             f"顶点数中位 {verts_med}）。"
-            "单次请求级覆盖通过 `Context.simplify_tolerance` 实现；"
-            "项目级常量化触发条件：客户提需求或下次重跑此脚本 IoU<0.95 占比 > 5%。"
+            "支持 `Context.simplify_tolerance` 的推理插件允许在单次请求中覆盖容差；"
+            "更换样本后，若 IoU < 0.95 的占比超过 5%，应重新评估所用容差。"
         )
     elif iou95 >= 85.0 and iou_mean >= 0.95:
         verts_warn = (
             ""
             if verts_med <= 200
-            else "（**注意**：超 200 顶点 WARN 阈值，调 tolerance 到 2-3 可降到 ~50）"
+            else "（**注意**：顶点数中位数超过推理插件的 200 顶点告警阈值）"
         )
         lines.append(
-            f"**`DEFAULT_SIMPLIFY_TOLERANCE = {primary_tol}` 接近验收线但未达** "
+            "**`mask_to_polygon` 在当前样本接近验收线但未达标** "
             f"（tolerance={primary_tol} IoU≥0.95 占比 {iou95}% < 95%、但 IoU mean {iou_mean} ≥ 0.95、"
             f"顶点数中位 {verts_med}）{verts_warn}。"
         )
         lines.append("")
         lines.append(
-            "**长尾分析**：少数样本（< 15%）IoU 落在 [0.5, 0.95) 区间，常见原因 ——"
-            "① 该 mask 含多个不连通片段，`mask_to_polygon` 仅取最大连通域；"
-            "② mask 含内部空洞，`cv2.RETR_EXTERNAL` 不输出 holes。"
-            "**保持默认值不动**（大头 ≥ 0.95 + IoU mean 0.98 已是可用区间），"
-            "把多片段 / 空洞处理作为 follow-up epic（ROADMAP P2 `mask→polygon 多连通域 / 空洞支持`）。"
+            "**低 IoU 样本分析**：`mask_to_polygon` 仅取最大连通域，"
+            "且 `cv2.RETR_EXTERNAL` 不保留空洞。对于含多个连通域或空洞的样本，"
+            "可在同一容差下对照 `mask_to_multi_polygon` 的结果，再判断是否要调整容差。"
         )
     else:
-        # 低 IoU 时不推荐"调 tolerance"作为解, 因为通常根因不在简化阈值
-        # (mask_to_polygon 取最大连通域 / RETR_EXTERNAL 丢空洞 / 像素级噪声等).
         lines.append(
             f"**⚠️ 当前样本 tolerance={primary_tol} IoU≥0.95 占比仅 {iou95}%（< 95% 验收线），"
             f"IoU mean {iou_mean}、顶点数中位 {verts_med}**。"
         )
         lines.append("")
-        # 跨 tolerance 看 IoU 变化幅度; 微小 → 根因不在简化
+        # 比较各容差的平均 IoU，判断调节容差是否有明显收益。
         iou_means = [summary[t]["iou"]["mean"] for t in tolerances]
         iou_spread = max(iou_means) - min(iou_means)
         if iou_spread < 0.05:
             lines.append(
-                f"**根因不在简化阈值**：5 档 tolerance ({min(tolerances)}→{max(tolerances)}) IoU mean "
-                f"差异仅 {iou_spread:.3f}，调 tolerance 收益微小。常见结构性原因："
+                f"**调整容差的收益有限**：测试的容差范围 ({min(tolerances)}→{max(tolerances)}) 内，"
+                f"IoU mean 的最大差异仅 {iou_spread:.3f}。可检查以下原因："
             )
             lines.append("")
             lines.append(
-                "- `mask_to_polygon` 取面积最大连通域，多片段 SAM mask 的小碎块被丢弃 → 应支持 `multi_polygon` 输出（follow-up）"
+                "- `mask_to_polygon` 只取面积最大的连通域，其他片段不会出现在重栅格化结果中。"
             )
             lines.append(
-                "- `cv2.RETR_EXTERNAL` 丢内部空洞 → mask 含空心结构时 IoU 偏低（follow-up：`RETR_CCOMP` + 内外环编码）"
+                "- `cv2.RETR_EXTERNAL` 不保留内部空洞，重栅格化可能因填满空洞而降低 IoU。"
             )
             lines.append(
-                "- SAM mask 边界本身有像素级噪声 → polygon 化前先 morphological closing"
+                "- 像素级边界噪声也会影响保真度，可单独评估形态学闭运算预处理的效果。"
             )
             lines.append("")
             verts_warn = (
-                "（已超 200 顶点 WARN 阈值，运维侧会高频告警）"
+                "（顶点数中位数超过推理插件的 200 顶点告警阈值）"
                 if verts_med > 200
                 else ""
             )
             lines.append(
-                f"**保持 `DEFAULT_SIMPLIFY_TOLERANCE = 1.0` 不动**{verts_warn}，"
-                "把多片段 / 空洞处理作为 follow-up epic 进 ROADMAP（v0.9.5 候选或 v0.10.x 与 sam3-backend 一并做）。"
-                f"用户单次需要降顶点数时可临时把 `Context.simplify_tolerance` 调到 3-5（顶点数中位降到 ~145 / ~95，IoU mean 仅微降）。"
+                f"**不建议仅为提升 IoU 而调整容差**{verts_warn}。"
+                "需要保留多个连通域或空洞时，对照 `mask_to_multi_polygon` 的 IoU；"
+                "需要减少顶点数时，按表中的 IoU 和顶点数选择容差。"
             )
         else:
             # IoU 在 tolerance 间有显著差异 → 调 tolerance 有意义, 推荐最优档
             best_tol = max(tolerances, key=lambda t: summary[t]["iou>=0.95_pct"])
             lines.append(
-                f"**建议把 `DEFAULT_SIMPLIFY_TOLERANCE` 调到 {best_tol}** "
+                f"**建议在已测试的容差中为 `mask_to_polygon` 选择 {best_tol}** "
                 f"（该档 IoU≥0.95 占比 {summary[best_tol]['iou>=0.95_pct']}% 最优）。"
             )
     lines.append("")
-    lines.append("## 逐样本明细")
+    lines.append("## `mask_to_polygon` 逐样本明细")
     lines.append("")
     headers = ["file", "size", "area"]
     for tol in tolerances:
