@@ -9,8 +9,7 @@ from urllib.parse import urljoin, urlparse
 from urllib.request import urlopen
 
 CONTRACTS = {
-    "yoao-inference-contract", "yoao-lifecycle-contract", "yoao-protocol-v2",
-    "yoao-task-contract", "yoao-training-contract",
+    "yoao-sdk",
 }
 
 

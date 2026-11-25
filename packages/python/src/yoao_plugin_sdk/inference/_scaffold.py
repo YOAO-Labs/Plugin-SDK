@@ -15,14 +15,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "my-color-region-plugin"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "yoao-plugin-sdk[inference]==0.1.0",
-    "yoao-inference-contract==0.1.0",
-    "yoao-lifecycle-contract==0.1.0",
-    "yoao-protocol-v2==0.2.0",
-    "yoao-task-contract==0.1.0",
-    "yoao-training-contract==0.1.0",
+    "yoao-sdk[protocol]==0.20.0",
 ]
 
 [project.scripts]

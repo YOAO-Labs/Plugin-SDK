@@ -54,8 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # Upstream yoao-inference-contract / yoao-training-contract currently declare >=3.11.
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -66,7 +65,9 @@ jobs:
           python -m pip install build 'setuptools>=68' wheel pytest pytest-asyncio
           python scripts/fetch-contracts.py --manifest "$CONTRACT_MANIFEST" --sha256 "$CONTRACT_MANIFEST_SHA256" --output "$RUNNER_TEMP/contracts"
           python scripts/build-sdk-artifacts.py --revision "$GITHUB_SHA" --output "$RUNNER_TEMP/sdk"
-          python -m pip install "$RUNNER_TEMP"/contracts/*.whl
+          for contract in "$RUNNER_TEMP"/contracts/yoao_sdk-*.whl; do
+            python -m pip install "${contract}[protocol]"
+          done
           for artifact in "$RUNNER_TEMP"/sdk/yoao_plugin_sdk-*.whl; do
             python -m pip install "${artifact}[inference,mask,qualification,dev]"
           done

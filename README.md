@@ -39,7 +39,7 @@ The three legacy inference-only distributions (`yoao-inference-plugin-sdk`, `yoa
 
 ## Portable contracts and local development
 
-The platform owns the portable contract source for inference (`yoao-protocol-v2`, `yoao-lifecycle-contract`, `yoao-inference-contract`, `yoao-task-contract`, `yoao-training-contract`). Base `yoao-plugin-sdk` and `@yoao/plugin-sdk` do not require those contracts; inference extras (`[inference-runtime]`, `[inference]`) do.
+The platform owns the portable contract source in a single Python `>=3.10` distribution, `yoao-sdk` (bundling `yoao_task_contract`, `yoao_lifecycle_contract`, `yoao_inference_contract`, `yoao_protocol_v2`, and `training_contract`). Base `yoao-plugin-sdk` and `@yoao/plugin-sdk` do not require `yoao-sdk`; inference extras (`[inference-runtime]`, `[inference]`) depend on `yoao-sdk[protocol]`.
 
 Managed checkpoint compatibility requires an explicit `format`: `null` identifies a native checkpoint without a separate export-format identity; named formats use nonempty strings. `null` is not a wildcard, and omitting the field is invalid.
 
@@ -57,7 +57,7 @@ python -m pytest packages/python/tests/test_sdk.py scripts/test_fetch_contracts.
 python -m pip install build 'setuptools>=68' wheel pytest pytest-asyncio PyJWT uvicorn
 python scripts/fetch-contracts.py --manifest "$CONTRACT_MANIFEST" --sha256 "$CONTRACT_MANIFEST_SHA256" --output /tmp/yoao-contracts
 python scripts/build-sdk-artifacts.py --revision HEAD --output /tmp/yoao-sdk
-python -m pip install /tmp/yoao-contracts/*.whl
+python -m pip install "/tmp/yoao-contracts/yoao_sdk-"*.whl"[protocol]"
 python -m pip install "/tmp/yoao-sdk/yoao_plugin_sdk-"*.whl"[inference,mask,qualification,dev]"
 python -m pytest --import-mode=importlib packages/python/tests scripts/test_fetch_contracts.py
 
