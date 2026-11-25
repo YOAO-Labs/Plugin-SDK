@@ -1,12 +1,14 @@
 # YOAO Plugin SDK
 
-YOAO stands for **You Only Annotate Once**. This repository maintains tools for authors of independent inference plugins. Use `yoao-plugin` to develop a plugin; `yoao plugins` belongs to the separate [platform API client](https://github.com/YOAO-Labs/ai-annotation-platform) and manages installations. The platform owns the portable contracts, authorization and storage. [YOAO-Plugins](https://github.com/YOAO-Labs/YOAO-Plugins) maintains the six official implementations and their model-specific asset catalogs.
+YOAO stands for **You Only Annotate Once**. This repository maintains multi-language SDKs and tooling for authors of independent YOAO plugins across all extension points (inference, notification channels, format adapters, and declarative themes). `yoao plugins` belongs to the separate [platform API client](https://github.com/YOAO-Labs/ai-annotation-platform) and manages installations. The platform owns the portable contracts, authorization and storage. [YOAO-Plugins](https://github.com/YOAO-Labs/YOAO-Plugins) maintains official plugin implementations.
 
-| Path | Python distribution | Purpose |
-| --- | --- | --- |
-| `packages/inference/sdk` | `yoao-inference-plugin-sdk` | Detection author interfaces, HTTP adapter and author tooling |
-| `packages/inference/runtime` | `yoao-backend-runtime` | Inference execution, cancellation and managed lifecycle helpers |
-| `packages/inference/mask-utils` | `yoao-mask-utils` | Mask conversion helpers |
+| Path | Distribution | Runtime | Purpose |
+| --- | --- | --- | --- |
+| `packages/python` | `yoao-plugin-sdk` | Python `>=3.10` | Universal `yoao-extension-manifest/v1` validation, auth helpers, notification/format/inference/theme protocol models, and `yoao-plugin-sdk` CLI |
+| `packages/js` | `@yoao/plugin-sdk` | Node.js `>=20` / TS | Zero-dependency ESM + `.d.ts` manifest validation, declarative `--sc-*` theme token validation, auth helpers, and `yoao-plugin-js` CLI |
+| `packages/inference/sdk` | `yoao-inference-plugin-sdk` | Python `>=3.11` | Detection author interfaces, HTTP adapter and author tooling |
+| `packages/inference/runtime` | `yoao-backend-runtime` | Python `>=3.10` | Inference execution, cancellation and managed lifecycle helpers |
+| `packages/inference/mask-utils` | `yoao-mask-utils` | Python `>=3.10` | Mask conversion helpers |
 
 UI, trainers and data export may gain separate capability packages when implemented; they do not inherit detection, HTTP or GPU APIs merely to be plugins. First-party SDK code is [MIT](LICENSE); third-party dependencies and assets retain their own terms.
 
