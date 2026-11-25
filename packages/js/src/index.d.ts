@@ -1,4 +1,32 @@
 export const EXTENSION_MANIFEST_SCHEMA: "yoao-extension-manifest/v1";
+export const INFERENCE_PROTOCOL_VERSION: "yoao-inference/v2";
+export const INFERENCE_WIRE_PROTOCOL_VERSION: "2.0";
+export const INFERENCE_EXECUTION_MODES: readonly ["container", "direct"];
+export const INFERENCE_TASK_VALUES: readonly [
+  "detect",
+  "segment",
+  "classify",
+  "pose",
+  "obb",
+  "ocr",
+  "doc_layout",
+  "tracker",
+  "interactive_seg",
+];
+export const INFERENCE_CAPABILITIES: readonly [
+  "inference",
+  "detection",
+  "segmentation",
+  "interactive",
+  "video_tracking",
+  "ocr",
+  "classification",
+  "obb",
+  "pose",
+  "doc_layout",
+  "managed_models",
+  "managed_evaluation",
+];
 export const TRAINER_PROTOCOL_VERSION: "yoao-trainer/v1";
 export const SHA256_PATTERN: "^[0-9a-f]{64}$";
 export const PREVIEW_SEED_MAX: number;
@@ -21,22 +49,82 @@ export type ExtensionPoint =
   | "trainer"
   | "theme";
 
+export type InferenceExecutionMode = "container" | "direct";
+export type InferenceTask =
+  | "detect"
+  | "segment"
+  | "classify"
+  | "pose"
+  | "obb"
+  | "ocr"
+  | "doc_layout"
+  | "tracker"
+  | "interactive_seg";
+export type InferenceCapability =
+  | "inference"
+  | "detection"
+  | "segmentation"
+  | "interactive"
+  | "video_tracking"
+  | "ocr"
+  | "classification"
+  | "obb"
+  | "pose"
+  | "doc_layout"
+  | "managed_models"
+  | "managed_evaluation";
+
+export interface InferenceComputeV1 {
+  device: "cpu" | "cuda";
+  gpu_memory_mb?: number;
+}
+
+export interface InferenceModelCapabilityV1 {
+  id: string;
+  task: InferenceTask;
+  is_interactive: boolean;
+  supported_prompts: string[];
+  supported_inputs: string[];
+  supported_geometric_outputs: string[];
+}
+
+export interface InferencePoolTopologyV1 {
+  cap: number;
+}
+
+export interface InferenceManagedModelCompatibilityV1 {
+  framework: string;
+  format: string | null;
+  runtime_device: "cpu" | "cuda";
+}
+
+export interface InferenceExtensionV1 {
+  execution_mode?: InferenceExecutionMode;
+  models: InferenceModelCapabilityV1[];
+  pools: Record<string, InferencePoolTopologyV1>;
+  compute: InferenceComputeV1;
+  sdk_compatibility?: string | null;
+  asset_manifest_sha256?: string | null;
+  allowed_asset_sources?: string[];
+  managed_model_compatibility?: InferenceManagedModelCompatibilityV1[];
+}
+
 export interface ExtensionManifestV1 {
   manifest_schema: "yoao-extension-manifest/v1";
   extension_point: ExtensionPoint;
   plugin_id: string;
   version: string;
-  display_name?: string;
-  description?: string;
-  homepage?: string;
+  display_name?: string | null;
+  description?: string | null;
+  homepage?: string | null;
   publisher: string;
   license: string;
   protocol_version: string;
-  entrypoint?: string[];
+  entrypoint?: string[] | null;
   capabilities: string[];
-  resource?: { memory_mb: number };
-  extension?: Record<string, unknown>;
-  artifact?: string;
+  resource?: { memory_mb: number } | null;
+  extension?: InferenceExtensionV1 | Record<string, unknown>;
+  artifact?: string | null;
 }
 
 export interface ThemeTokensDocument {

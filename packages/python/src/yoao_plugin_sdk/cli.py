@@ -118,9 +118,25 @@ def _template_manifest(extension_point: str, name: str) -> dict[str, Any]:
         "license": "MIT",
         "protocol_version": "yoao-inference/v2",
         "entrypoint": ["python", "-m", "plugin.server"],
-        "capabilities": ["predict", "health"],
+        "capabilities": ["inference", "detection"],
         "resource": {"memory_mb": 1024},
-        "extension": {},
+        "extension": {
+            "execution_mode": "direct",
+            "models": [
+                {
+                    "id": "detect",
+                    "task": "detect",
+                    "is_interactive": False,
+                    "supported_prompts": ["none"],
+                    "supported_inputs": ["full_image"],
+                    "supported_geometric_outputs": ["bbox"],
+                }
+            ],
+            "pools": {"models": {"cap": 1}},
+            "compute": {"device": "cpu", "gpu_memory_mb": 0},
+            "allowed_asset_sources": [],
+            "managed_model_compatibility": [],
+        },
     }
 
 

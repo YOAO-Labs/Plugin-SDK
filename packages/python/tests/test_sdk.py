@@ -132,7 +132,10 @@ def test_manifest_rejects_shell_entrypoint_and_self_reported_source_tier() -> No
 
 def test_auth_and_protocol_models(tmp_path: Path) -> None:
     assert INFERENCE_PROTOCOL_VERSION == "yoao-inference/v2"
-    assert "predict" in SUPPORTED_CAPABILITIES
+    assert "inference" in SUPPORTED_CAPABILITIES
+    assert "detection" in SUPPORTED_CAPABILITIES
+    assert "managed_evaluation" in SUPPORTED_CAPABILITIES
+    assert "train" not in SUPPORTED_CAPABILITIES
 
     secret_file = tmp_path / "token.txt"
     secret_file.write_text("  super-secret  \n", encoding="utf-8")
@@ -170,6 +173,128 @@ def test_auth_and_protocol_models(tmp_path: Path) -> None:
         ]
     )
     assert len(json.loads(parsed.model_dump_json())["items"]) == 1
+
+
+def test_inference_extension_manifest_container_and_direct_modes(tmp_path: Path) -> None:
+    base_extension = {
+        "models": [
+            {
+                "id": "seg",
+                "task": "segment",
+                "is_interactive": False,
+                "supported_prompts": ["none"],
+                "supported_inputs": ["full_image", "crop"],
+                "supported_geometric_outputs": ["polygon", "mask_rle"],
+            }
+        ],
+        "pools": {"seg": {"cap": 2}},
+        "compute": {"device": "cuda", "gpu_memory_mb": 2048},
+        "asset_manifest_sha256": DIGEST_A,
+        "allowed_asset_sources": ["https://example.com/weights"],
+        "managed_model_compatibility": [
+            {"framework": "ultralytics", "format": None, "runtime_device": "cuda"}
+        ],
+    }
+    container_doc = {
+        "manifest_schema": EXTENSION_MANIFEST_SCHEMA,
+        "extension_point": "inference",
+        "plugin_id": "yoao.inference.yolo",
+        "version": "1.0.0",
+        "display_name": "YOLO Inference",
+        "description": "Multi-task detection and segmentation plugin.",
+        "homepage": "https://example.com/yolo",
+        "publisher": "YOAO Official",
+        "license": "AGPL-3.0",
+        "protocol_version": INFERENCE_PROTOCOL_VERSION,
+        "entrypoint": ["yoao-yolo", "serve", "--port", "8000"],
+        "capabilities": [
+            "inference",
+            "detection",
+            "segmentation",
+            "managed_models",
+            "managed_evaluation",
+        ],
+        "resource": {"memory_mb": 2048},
+        "extension": base_extension,
+    }
+    parsed_container = ExtensionManifestV1.model_validate(container_doc)
+    bound = parsed_container.bind_artifact(f"ghcr.io/yoao/yolo@sha256:{DIGEST_B}")
+    assert bound.artifact == f"ghcr.io/yoao/yolo@sha256:{DIGEST_B}"
+
+    direct_doc = {
+        "manifest_schema": EXTENSION_MANIFEST_SCHEMA,
+        "extension_point": "inference",
+        "plugin_id": "custom.inference.ocr",
+        "version": "0.2.0",
+        "publisher": "Team",
+        "license": "MIT",
+        "protocol_version": INFERENCE_PROTOCOL_VERSION,
+        "capabilities": ["inference", "ocr", "doc_layout"],
+        "extension": {
+            "execution_mode": "direct",
+            "models": [
+                {
+                    "id": "ocr",
+                    "task": "ocr",
+                    "is_interactive": False,
+                    "supported_prompts": ["none"],
+                    "supported_inputs": ["full_image"],
+                    "supported_geometric_outputs": ["polygon"],
+                }
+            ],
+            "pools": {"ocr": {"cap": 1}},
+            "compute": {"device": "cuda", "gpu_memory_mb": 0},
+        },
+    }
+    parsed_direct = ExtensionManifestV1.model_validate(direct_doc)
+    assert parsed_direct.entrypoint is None
+    assert parsed_direct.resource is None
+    with pytest.raises(ValueError, match="direct inference manifest"):
+        parsed_direct.bind_artifact(f"ghcr.io/yoao/ocr@sha256:{DIGEST_B}")
+
+    invalid_cases = [
+        {**container_doc, "capabilities": ["inference", "train"]},
+        {**container_doc, "capabilities": ["detection"]},
+        {**container_doc, "capabilities": ["inference", "managed_evaluation"]},
+        {
+            **container_doc,
+            "capabilities": ["inference", "detection"],
+            "extension": {**base_extension, "managed_model_compatibility": [{"framework": "x", "format": None, "runtime_device": "cuda"}]},
+        },
+        {
+            **container_doc,
+            "extension": {**base_extension, "asset_manifest_sha256": None},
+        },
+        {
+            **container_doc,
+            "extension": {**base_extension, "compute": {"device": "cuda", "gpu_memory_mb": 0}},
+        },
+        {**direct_doc, "artifact": f"ghcr.io/yoao/ocr@sha256:{DIGEST_B}"},
+        {**direct_doc, "extension": {**direct_doc["extension"], "source_tier": "official"}},
+    ]
+    for bad in invalid_cases:
+        with pytest.raises(ValidationError):
+            ExtensionManifestV1.model_validate(bad)
+
+    for extra_bad in (
+        {k: v for k, v in container_doc.items() if k != "manifest_schema"},
+        {**container_doc, "homepage": "https://example.com:99999/x"},
+        {**container_doc, "homepage": "https://example.com:/x"},
+        {**container_doc, "homepage": "https://2130706433/x"},
+        {**container_doc, "entrypoint": ["yoao-yolo", "   "]},
+        {**container_doc, "version": "   "},
+        {**container_doc, "license": "MIT\x00"},
+    ):
+        with pytest.raises(ValidationError):
+            ExtensionManifestV1.model_validate(extra_bad)
+
+    dup_file = tmp_path / "dup-manifest.json"
+    dup_file.write_text(
+        '{"manifest_schema":"yoao-extension-manifest/v1","manifest_schema":"x"}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="duplicate JSON key"):
+        load_manifest_file(dup_file)
 
 
 def test_trainer_protocol_models_and_atomic_writers(

@@ -2,8 +2,20 @@ from __future__ import annotations
 
 from typing import Any
 
-INFERENCE_PROTOCOL_VERSION = "yoao-inference/v2"
-SUPPORTED_CAPABILITIES = ("predict", "train", "track", "health")
+from yoao_plugin_sdk.manifest import (
+    INFERENCE_CAPABILITIES,
+    INFERENCE_EXECUTION_MODES,
+    INFERENCE_PROTOCOL_VERSION,
+    INFERENCE_TASK_VALUES,
+    INFERENCE_WIRE_PROTOCOL_VERSION,
+    InferenceComputeV1,
+    InferenceExtensionV1,
+    InferenceManagedModelCompatibilityV1,
+    InferenceModelCapabilityV1,
+    InferencePoolTopologyV1,
+)
+
+SUPPORTED_CAPABILITIES = INFERENCE_CAPABILITIES
 
 _AUTHORING_EXPORTS = frozenset(
     {
@@ -31,8 +43,17 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "INFERENCE_CAPABILITIES",
+    "INFERENCE_EXECUTION_MODES",
     "INFERENCE_PROTOCOL_VERSION",
+    "INFERENCE_TASK_VALUES",
+    "INFERENCE_WIRE_PROTOCOL_VERSION",
     "SUPPORTED_CAPABILITIES",
+    "InferenceComputeV1",
+    "InferenceExtensionV1",
+    "InferenceManagedModelCompatibilityV1",
+    "InferenceModelCapabilityV1",
+    "InferencePoolTopologyV1",
     "Detection",
     "DetectionConfig",
     "DetectionModel",

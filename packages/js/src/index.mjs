@@ -1,4 +1,12 @@
-export { EXTENSION_MANIFEST_SCHEMA, validateManifest } from "./manifest.mjs";
+export {
+  EXTENSION_MANIFEST_SCHEMA,
+  INFERENCE_CAPABILITIES,
+  INFERENCE_EXECUTION_MODES,
+  INFERENCE_PROTOCOL_VERSION,
+  INFERENCE_TASK_VALUES,
+  INFERENCE_WIRE_PROTOCOL_VERSION,
+  validateManifest,
+} from "./manifest.mjs";
 export { validateThemeTokens } from "./theme.mjs";
 export { readSecret, verifyBearerToken } from "./auth.mjs";
 export {

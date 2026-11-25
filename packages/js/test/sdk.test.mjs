@@ -6,6 +6,11 @@ import test from "node:test";
 
 import {
   EXTENSION_MANIFEST_SCHEMA,
+  INFERENCE_CAPABILITIES,
+  INFERENCE_EXECUTION_MODES,
+  INFERENCE_PROTOCOL_VERSION,
+  INFERENCE_TASK_VALUES,
+  INFERENCE_WIRE_PROTOCOL_VERSION,
   PREVIEW_MAX_POOL_BYTES,
   PREVIEW_MAX_SOURCE_BYTES,
   SHA256_PATTERN,
@@ -112,6 +117,184 @@ test("validateManifest accepts theme and trainer manifests and rejects shell/sou
         extension: { source_tier: "official" },
       }),
     /source_tier/,
+  );
+
+  assert.equal(INFERENCE_PROTOCOL_VERSION, "yoao-inference/v2");
+  assert.equal(INFERENCE_WIRE_PROTOCOL_VERSION, "2.0");
+  assert.ok(INFERENCE_EXECUTION_MODES.includes("direct"));
+  assert.ok(INFERENCE_TASK_VALUES.includes("pose"));
+  assert.ok(INFERENCE_TASK_VALUES.includes("doc_layout"));
+  assert.ok(!INFERENCE_CAPABILITIES.includes("train"));
+
+  const inferenceContainer = validateManifest({
+    manifest_schema: EXTENSION_MANIFEST_SCHEMA,
+    extension_point: "inference",
+    plugin_id: "yoao.inference.yolo",
+    version: "1.0.0",
+    publisher: "YOAO Official",
+    license: "AGPL-3.0",
+    protocol_version: INFERENCE_PROTOCOL_VERSION,
+    entrypoint: ["yoao-yolo", "serve", "--port", "8000"],
+    capabilities: ["inference", "segmentation", "managed_models", "managed_evaluation"],
+    resource: { memory_mb: 2048 },
+    extension: {
+      execution_mode: "container",
+      models: [
+        {
+          id: "seg",
+          task: "segment",
+          is_interactive: false,
+          supported_prompts: ["none"],
+          supported_inputs: ["full_image"],
+          supported_geometric_outputs: ["polygon"],
+        },
+      ],
+      pools: { seg: { cap: 2 } },
+      compute: { device: "cuda", gpu_memory_mb: 2048 },
+      asset_manifest_sha256: DIGEST_A,
+      managed_model_compatibility: [
+        { framework: "ultralytics", format: null, runtime_device: "cuda" },
+      ],
+    },
+  });
+  assert.equal(inferenceContainer.extension_point, "inference");
+
+  const inferenceDirect = validateManifest({
+    manifest_schema: EXTENSION_MANIFEST_SCHEMA,
+    extension_point: "inference",
+    plugin_id: "custom.inference.ocr",
+    version: "0.1.0",
+    publisher: "Team",
+    license: "MIT",
+    protocol_version: INFERENCE_PROTOCOL_VERSION,
+    capabilities: ["inference", "ocr", "pose"],
+    extension: {
+      execution_mode: "direct",
+      models: [
+        {
+          id: "ocr",
+          task: "ocr",
+          is_interactive: false,
+          supported_prompts: ["none"],
+          supported_inputs: ["full_image"],
+          supported_geometric_outputs: ["polygon"],
+        },
+      ],
+      pools: { ocr: { cap: 1 } },
+      compute: { device: "cuda", gpu_memory_mb: 0 },
+    },
+  });
+  assert.equal(inferenceDirect.extension.execution_mode, "direct");
+
+  assert.throws(
+    () =>
+      validateManifest({
+        ...inferenceDirect,
+        capabilities: ["inference", "train"],
+      }),
+    /unsupported capability/,
+  );
+  assert.throws(
+    () =>
+      validateManifest({
+        ...inferenceDirect,
+        capabilities: ["inference", "managed_evaluation"],
+      }),
+    /managed_models/,
+  );
+  assert.throws(
+    () =>
+      validateManifest({
+        ...inferenceDirect,
+        artifact: `ghcr.io/yoao/ocr@sha256:${DIGEST_B}`,
+      }),
+    /direct inference manifest must not carry an OCI artifact/,
+  );
+  assert.throws(
+    () =>
+      validateManifest({
+        ...inferenceContainer,
+        extension: {
+          ...inferenceContainer.extension,
+          compute: { device: "cuda", gpu_memory_mb: 0 },
+        },
+      }),
+    /gpu_memory_mb > 0/,
+  );
+  assert.throws(
+    () => validateManifest({ ...inferenceDirect, source_tier: "official" }),
+    /unexpected key: source_tier/,
+  );
+  assert.throws(
+    () => validateManifest({ ...inferenceDirect, unexpected: 1 }),
+    /unexpected key: unexpected/,
+  );
+  for (const badHomepage of [
+    "http://example.com",
+    "https://127.0.0.1/x",
+    "https://169.254.169.254/latest",
+    "https://[::ffff:127.0.0.1]/x",
+    "https://2130706433/x",
+    "https://example.com:99999/x",
+    "https://example.com:/x",
+    "javascript:alert(1)",
+    12345,
+  ]) {
+    assert.throws(
+      () => validateManifest({ ...inferenceDirect, homepage: badHomepage }),
+      /homepage/,
+    );
+  }
+  assert.throws(
+    () => validateManifest({ ...inferenceDirect, display_name: "ok\nname" }),
+    /display_name/,
+  );
+  assert.throws(
+    () => validateManifest({ ...inferenceDirect, description: "a".repeat(281) }),
+    /description/,
+  );
+  assert.throws(
+    () => validateManifest({ ...inferenceDirect, version: "   " }),
+    /version/,
+  );
+  assert.throws(
+    () => validateManifest({ ...inferenceDirect, plugin_id: "a".repeat(129) }),
+    /plugin_id/,
+  );
+  assert.throws(
+    () =>
+      validateManifest({
+        ...inferenceContainer,
+        entrypoint: ["yoao-yolo", "   "],
+      }),
+    /entrypoint/,
+  );
+  assert.throws(
+    () =>
+      validateManifest({
+        ...inferenceContainer,
+        extension: {
+          ...inferenceContainer.extension,
+          managed_model_compatibility: [{ framework: "ultralytics", runtime_device: "cuda" }],
+        },
+      }),
+    /format is required/,
+  );
+  assert.throws(
+    () =>
+      validateManifest({
+        ...themeManifest,
+        entrypoint: ["bash", "-c", "id"],
+      }),
+    /shell/,
+  );
+  assert.throws(
+    () =>
+      validateManifest({
+        ...themeManifest,
+        extension: [],
+      }),
+    /extension must be a JSON object/,
   );
 });
 
