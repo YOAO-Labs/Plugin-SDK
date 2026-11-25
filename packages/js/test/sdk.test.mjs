@@ -27,6 +27,22 @@ test("validateManifest accepts theme and format_adapter manifests and rejects sh
   });
   assert.equal(themeManifest.extension_point, "theme");
 
+  const trainerManifest = validateManifest({
+    manifest_schema: EXTENSION_MANIFEST_SCHEMA,
+    extension_point: "trainer",
+    plugin_id: "yoao.trainer.ultralytics",
+    version: "1.0.0",
+    display_name: "Ultralytics Trainer",
+    publisher: "YOAO Official",
+    license: "MIT",
+    protocol_version: "yoao-trainer/v1",
+    entrypoint: ["yoao-trainer-ultralytics"],
+    capabilities: ["train", "evaluate", "preview", "export_weights"],
+    resource: { memory_mb: 8192 },
+    extension: { framework_id: "ultralytics" },
+  });
+  assert.equal(trainerManifest.extension_point, "trainer");
+
   assert.throws(
     () =>
       validateManifest({
@@ -43,6 +59,24 @@ test("validateManifest accepts theme and format_adapter manifests and rejects sh
         extension: {},
       }),
     /shell/,
+  );
+
+  assert.throws(
+    () =>
+      validateManifest({
+        manifest_schema: EXTENSION_MANIFEST_SCHEMA,
+        extension_point: "format_adapter",
+        plugin_id: "bad.python",
+        version: "1.0.0",
+        publisher: "Test",
+        license: "MIT",
+        protocol_version: "yoao-format-adapter/v1",
+        entrypoint: ["python3", "-c", "print(1)"],
+        capabilities: ["import"],
+        resource: { memory_mb: 128 },
+        extension: {},
+      }),
+    /python -c/,
   );
 
   assert.throws(

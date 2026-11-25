@@ -4,6 +4,7 @@ const PROTOCOL_BY_POINT = Object.freeze({
   inference: "yoao-inference/v2",
   notification_channel: "yoao-notification-channel/v1",
   format_adapter: "yoao-format-adapter/v1",
+  trainer: "yoao-trainer/v1",
   theme: "yoao-theme/v1",
 });
 
@@ -11,6 +12,7 @@ const CAPABILITIES_BY_POINT = Object.freeze({
   inference: new Set(["predict", "train", "track", "health"]),
   notification_channel: new Set(["deliver", "verify_address"]),
   format_adapter: new Set(["import", "export"]),
+  trainer: new Set(["train", "evaluate", "preview", "export_weights"]),
   theme: new Set(["light", "dark"]),
 });
 
@@ -66,24 +68,37 @@ export function validateManifest(manifest) {
     }
   }
   if (point !== "theme") {
-    if (!Array.isArray(manifest.entrypoint) || manifest.entrypoint.length === 0) {
-      throw new Error(`${point} manifest requires entrypoint`);
+    if (!Array.isArray(manifest.entrypoint) || manifest.entrypoint.length === 0 || manifest.entrypoint.length > 64) {
+      throw new Error(`${point} manifest requires entrypoint with 1..64 arguments`);
+    }
+    for (const arg of manifest.entrypoint) {
+      if (typeof arg !== "string" || !arg || /[\x00\r\n]/.test(arg)) {
+        throw new Error("entrypoint arguments must be non-empty single-line strings");
+      }
     }
     const head = manifest.entrypoint[0];
     if (
-      typeof head !== "string" ||
       !ENTRYPOINT_HEAD_RE.test(head) ||
       SHELL_EXECUTABLES.has(head.toLowerCase())
     ) {
       throw new Error("entrypoint must not invoke a shell");
     }
     if (
+      head.toLowerCase().startsWith("python") &&
+      manifest.entrypoint
+        .slice(1)
+        .some((arg) => arg === "-c" || (arg.startsWith("-") && !arg.startsWith("--") && arg.slice(1).includes("c")))
+    ) {
+      throw new Error("entrypoint must not invoke python -c");
+    }
+    if (
       !manifest.resource ||
       typeof manifest.resource !== "object" ||
       !Number.isInteger(manifest.resource.memory_mb) ||
-      manifest.resource.memory_mb < 16
+      manifest.resource.memory_mb < 16 ||
+      manifest.resource.memory_mb > 65536
     ) {
-      throw new Error(`${point} manifest requires resource.memory_mb >= 16`);
+      throw new Error(`${point} manifest requires resource.memory_mb in 16..65536`);
     }
   }
   return manifest;

@@ -10,7 +10,13 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator, model_validator
 
 EXTENSION_MANIFEST_SCHEMA = "yoao-extension-manifest/v1"
-EXTENSION_POINTS = ("inference", "notification_channel", "format_adapter", "theme")
+EXTENSION_POINTS = (
+    "inference",
+    "notification_channel",
+    "format_adapter",
+    "trainer",
+    "theme",
+)
 
 PLUGIN_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 OCI_DIGEST_PATTERN = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
@@ -21,6 +27,7 @@ _PROTOCOL_BY_POINT: dict[str, str] = {
     "inference": "yoao-inference/v2",
     "notification_channel": "yoao-notification-channel/v1",
     "format_adapter": "yoao-format-adapter/v1",
+    "trainer": "yoao-trainer/v1",
     "theme": "yoao-theme/v1",
 }
 
@@ -28,6 +35,7 @@ _CAPABILITIES_BY_POINT: dict[str, frozenset[str]] = {
     "inference": frozenset({"predict", "train", "track", "health"}),
     "notification_channel": frozenset({"deliver", "verify_address"}),
     "format_adapter": frozenset({"import", "export"}),
+    "trainer": frozenset({"train", "evaluate", "preview", "export_weights"}),
     "theme": frozenset({"light", "dark"}),
 }
 
@@ -105,7 +113,9 @@ class ExtensionManifestV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     manifest_schema: Literal["yoao-extension-manifest/v1"] = EXTENSION_MANIFEST_SCHEMA
-    extension_point: Literal["inference", "notification_channel", "format_adapter", "theme"]
+    extension_point: Literal[
+        "inference", "notification_channel", "format_adapter", "trainer", "theme"
+    ]
     plugin_id: StrictStr = Field(min_length=1, max_length=128)
     version: StrictStr = Field(min_length=1, max_length=128)
     display_name: StrictStr | None = None

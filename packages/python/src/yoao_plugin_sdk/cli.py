@@ -9,6 +9,7 @@ from typing import Any
 from yoao_plugin_sdk._version import __version__
 from yoao_plugin_sdk.manifest import (
     EXTENSION_MANIFEST_SCHEMA,
+    EXTENSION_POINTS,
     load_manifest_file,
 )
 
@@ -65,6 +66,30 @@ def _template_manifest(extension_point: str, name: str) -> dict[str, Any]:
                 "allowed_egress_hosts": [],
             },
         }
+    if extension_point == "trainer":
+        return {
+            "manifest_schema": EXTENSION_MANIFEST_SCHEMA,
+            "extension_point": "trainer",
+            "plugin_id": f"custom.trainer.{slug}",
+            "version": "0.1.0",
+            "display_name": name,
+            "description": f"Custom YOAO trainer plugin ({name}).",
+            "publisher": "Custom Publisher",
+            "license": "MIT",
+            "protocol_version": "yoao-trainer/v1",
+            "entrypoint": ["python", "-m", "plugin.trainer"],
+            "capabilities": ["train", "evaluate", "export_weights"],
+            "resource": {"memory_mb": 4096},
+            "extension": {
+                "framework_id": slug.replace("-", "_"),
+                "framework_version": "0.1.0",
+                "supported_tasks": ["detect"],
+                "supported_dataset_contracts": ["ultralytics-bbox-1"],
+                "requires_gpu": True,
+                "preview_cpu_only": True,
+                "allowed_egress_hosts": [],
+            },
+        }
     if extension_point == "theme":
         return {
             "manifest_schema": EXTENSION_MANIFEST_SCHEMA,
@@ -99,8 +124,35 @@ def _template_manifest(extension_point: str, name: str) -> dict[str, Any]:
     }
 
 
+def _run_inference_authoring(argv: list[str]) -> int:
+    try:
+        from yoao_plugin_sdk.inference.authoring import cli as inference_cli
+    except ImportError as exc:
+        print(
+            f"yoao-plugin: '{argv[0]}' requires optional inference dependencies "
+            f"(pip install 'yoao-plugin-sdk[inference]'): {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        inference_cli.main(argv)
+    except SystemExit as exc:
+        return int(exc.code) if isinstance(exc.code, int) else 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="yoao-plugin")
+    args_list = list(sys.argv[1:] if argv is None else argv)
+    if args_list and args_list[0] in {"dev", "check", "build"}:
+        return _run_inference_authoring(args_list)
+
+    parser = argparse.ArgumentParser(
+        prog="yoao-plugin",
+        description=(
+            "Universal YOAO plugin CLI (version, validate, init) plus inference "
+            "authoring commands (dev, check, build)."
+        ),
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("version", help="Print yoao-plugin-sdk version")
@@ -112,12 +164,21 @@ def main(argv: list[str] | None = None) -> int:
     init_p.add_argument(
         "--type",
         dest="extension_point",
-        choices=("inference", "notification_channel", "format_adapter", "theme"),
+        choices=EXTENSION_POINTS,
         required=True,
+    )
+    init_p.add_argument(
+        "--example",
+        action="store_true",
+        help="For inference plugins, also scaffold the runnable CPU color-region demo package.",
     )
     init_p.add_argument("target_dir", type=Path)
 
-    args = parser.parse_args(argv)
+    sub.add_parser("dev", help="Run a local inference plugin development server (requires [inference])")
+    sub.add_parser("check", help="Check an inference plugin endpoint or run local GPU qualification")
+    sub.add_parser("build", help="Build a plugin wheel or locked OCI container image")
+
+    args = parser.parse_args(args_list)
     if args.command == "version":
         print(__version__)
         return 0
@@ -142,12 +203,31 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "init":
         target: Path = args.target_dir
-        target.mkdir(parents=True, exist_ok=True)
+        use_example = bool(args.example and args.extension_point == "inference")
+        if use_example:
+            from yoao_plugin_sdk.inference._scaffold import init_project
+
+            try:
+                init_project(target)
+            except FileExistsError:
+                print(f"Refusing to overwrite existing directory {target}", file=sys.stderr)
+                return 1
+        else:
+            target.mkdir(parents=True, exist_ok=True)
         manifest_path = target / "manifest.json"
         if manifest_path.exists():
             print(f"Refusing to overwrite existing {manifest_path}", file=sys.stderr)
             return 1
         doc = _template_manifest(args.extension_point, target.name)
+        if use_example:
+            doc["entrypoint"] = [
+                "my-color-region-plugin",
+                "serve",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8000",
+            ]
         manifest_path.write_text(
             json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )

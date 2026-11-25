@@ -4,6 +4,7 @@ export type ExtensionPoint =
   | "inference"
   | "notification_channel"
   | "format_adapter"
+  | "trainer"
   | "theme";
 
 export interface ExtensionManifestV1 {

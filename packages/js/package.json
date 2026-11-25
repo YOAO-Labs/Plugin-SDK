@@ -1,7 +1,7 @@
 {
   "name": "@yoao/plugin-sdk",
   "version": "0.1.0",
-  "description": "Zero-dependency JavaScript/TypeScript SDK for YOAO plugins (manifest validation, declarative themes, notification channels, and format adapters).",
+  "description": "Zero-dependency JavaScript/TypeScript SDK for YOAO plugins (manifest validation, declarative themes, trainers, notification channels, and format adapters).",
   "license": "MIT",
   "type": "module",
   "engines": {

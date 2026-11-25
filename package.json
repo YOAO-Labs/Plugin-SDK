@@ -1,0 +1,8 @@
+{
+  "name": "yoao-plugin-sdk-monorepo",
+  "private": true,
+  "scripts": {
+    "test:js": "node --test packages/js/test/sdk.test.mjs",
+    "test:python": "pytest packages/python/tests scripts/test_fetch_contracts.py"
+  }
+}
