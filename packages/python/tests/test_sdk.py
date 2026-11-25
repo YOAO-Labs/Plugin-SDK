@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -19,7 +22,13 @@ from yoao_plugin_sdk.format_adapter import ImportParseResponse, ParsedAnnotation
 from yoao_plugin_sdk.inference import INFERENCE_PROTOCOL_VERSION, SUPPORTED_CAPABILITIES
 from yoao_plugin_sdk.notification import DeliverRequest, DeliverResult, DeliveryEnvelope
 from yoao_plugin_sdk.trainer import (
+    PREVIEW_MAX_POOL_BYTES,
+    PREVIEW_MAX_SOURCE_BYTES,
     TRAINER_PROTOCOL_VERSION,
+    PreviewOutputV1,
+    PreviewReportV1,
+    PreviewSourceV1,
+    PreviewSpecV1,
     ServingCompatibilityV1,
     TrainArtifactV1,
     TrainEventV1,
@@ -27,9 +36,31 @@ from yoao_plugin_sdk.trainer import (
     TrainSpecV1,
     TrainerArchitectureV1,
     TrainerCapabilitiesV1,
+    ValidateConfigResultV1,
+    ValidationIssueV1,
     atomic_write_json,
+    canonical_json_bytes,
+    canonical_json_digest,
     write_event_jsonl,
 )
+
+DIGEST_A = "a" * 64
+DIGEST_B = "b" * 64
+DIGEST_C = "c" * 64
+DIGEST_D = "d" * 64
+DIGEST_E = "e" * 64
+
+
+def _collect_schema_keys(node: Any) -> set[str]:
+    found: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            found.add(key)
+            found.update(_collect_schema_keys(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.update(_collect_schema_keys(item))
+    return found
 
 
 @pytest.mark.parametrize("extension_point", EXTENSION_POINTS)
@@ -141,104 +172,456 @@ def test_auth_and_protocol_models(tmp_path: Path) -> None:
     assert len(json.loads(parsed.model_dump_json())["items"]) == 1
 
 
-def test_trainer_protocol_models_and_atomic_writers(tmp_path: Path) -> None:
+def test_trainer_protocol_models_and_atomic_writers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     compat = ServingCompatibilityV1(
-        framework="ultralytics",
+        framework="example-trainer",
         format=None,
-        training_runtime={"python": "3.12", "ultralytics": "8.4.183"},
-        compatible_serving_runtimes=[{"device": "cpu", "ultralytics": "8.4.183"}],
+        training_runtime={"python": "3.12", "framework": "1.0.0"},
+        compatible_serving_runtimes=[{"device": "cpu", "framework": "1.0.0"}],
     )
     caps = TrainerCapabilitiesV1(
-        framework_id="ultralytics",
-        framework_version="8.4.183",
+        protocol_version=TRAINER_PROTOCOL_VERSION,
+        framework_id="example-trainer",
+        framework_version="1.0.0",
         runtime_versions={"python": "3.12"},
         supported_tasks=["detect"],
-        supported_dataset_contracts=["ultralytics-bbox-1"],
+        supported_dataset_contracts=["bbox-v1"],
         architectures=[
             TrainerArchitectureV1(
-                id="yolo11n",
-                family="yolo11",
+                id="demo-n",
+                family="demo",
                 tasks=["detect"],
-                base_asset_filename="yolo11n.pt",
+                base_asset_filename="demo-n.pt",
+                base_asset_sha256=DIGEST_A,
             )
         ],
+        policy_digests={"budget": DIGEST_B},
         serving_compatibility=[compat],
     )
     assert caps.protocol_version == TRAINER_PROTOCOL_VERSION
+    assert len(canonical_json_digest(caps)) == 64
+
+    valid_cfg = ValidateConfigResultV1(
+        protocol_version=TRAINER_PROTOCOL_VERSION,
+        valid=True,
+        schema_id="example-1.0.0-detect-1",
+        schema_digest=DIGEST_A,
+        resolved_config={"epochs": 10},
+        effective_values={"epochs": 10},
+        origins={"epochs": "user"},
+    )
+    assert valid_cfg.valid is True
+    invalid_cfg = ValidateConfigResultV1(
+        protocol_version=TRAINER_PROTOCOL_VERSION,
+        valid=False,
+        issues=[ValidationIssueV1(code="range_error", field="epochs", message="must be >= 1")],
+    )
+    assert len(invalid_cfg.issues) == 1
 
     spec = TrainSpecV1(
+        protocol_version=TRAINER_PROTOCOL_VERSION,
         run_id="run-1",
         attempt_id="attempt-1",
-        framework_id="ultralytics",
+        framework_id="example-trainer",
         task="detect",
-        architecture_id="yolo11n",
-        dataset_contract="ultralytics-bbox-1",
+        architecture_id="demo-n",
+        dataset_contract="bbox-v1",
         dataset_dir="/work/input/dataset",
+        dataset_snapshot_digest=DIGEST_A,
+        config_digest=DIGEST_B,
+        classes_digest=DIGEST_C,
+        schema_id="example-1.0.0-detect-1",
+        schema_digest=DIGEST_D,
         parameters={"epochs": 10},
     )
-    spec_path = tmp_path / "spec.json"
+    spec_path = tmp_path / "nested" / "spec.json"
     atomic_write_json(spec_path, spec)
-    assert json.loads(spec_path.read_text(encoding="utf-8"))["attempt_id"] == "attempt-1"
+    assert stat.S_IMODE(spec_path.stat().st_mode) == 0o644
+    raw_spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    assert raw_spec["attempt_id"] == "attempt-1"
+    assert TrainSpecV1.model_validate(raw_spec) == spec
 
     events_path = tmp_path / "events.jsonl"
     write_event_jsonl(
         events_path,
-        TrainEventV1(seq=1, kind="epoch", epoch=1, total_epochs=10, progress=0.1, metrics={"map50": 0.72}),
+        TrainEventV1(
+            seq=1,
+            kind="epoch",
+            epoch=1,
+            total_epochs=10,
+            progress=1,
+            metrics={"map50": 0.72},
+        ),
     )
-    rows = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
-    assert rows == [
-        {
-            "detail": {},
-            "epoch": 1,
-            "kind": "epoch",
-            "metrics": {"map50": 0.72},
-            "progress": 0.1,
-            "seq": 1,
-            "total_epochs": 10,
-        }
-    ]
+    write_event_jsonl(
+        events_path,
+        TrainEventV1(seq=2, kind="progress", progress=-0.0, metrics={"loss": -0.0}),
+    )
+    lines = events_path.read_text(encoding="utf-8").splitlines()
+    assert "-0.0" not in lines[1]
+    rows = [json.loads(line) for line in lines]
+    assert rows[0]["progress"] == 1.0
+    assert rows[1]["progress"] == 0.0
+    assert rows[1]["metrics"]["loss"] == 0.0
 
     receipt = TrainReceiptV1(
+        protocol_version=TRAINER_PROTOCOL_VERSION,
         status="succeeded",
         artifacts=[
             TrainArtifactV1(
                 role="weights",
                 filename="best.pt",
-                sha256="a" * 64,
+                sha256=DIGEST_A,
                 size_bytes=1024,
             )
         ],
         serving_compatibility=compat,
     )
     receipt_path = tmp_path / "result.json"
-    atomic_write_json(receipt_path, receipt)
+    atomic_write_json(receipt_path, receipt, mode=0o600)
+    assert stat.S_IMODE(receipt_path.stat().st_mode) == 0o600
     raw_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     assert raw_receipt["serving_compatibility"]["format"] is None
     reloaded = TrainReceiptV1.model_validate(raw_receipt)
-    assert reloaded.status == "succeeded"
-    assert reloaded.serving_compatibility is not None
-    assert reloaded.serving_compatibility.format is None
+    assert reloaded == receipt
+    assert canonical_json_digest(reloaded) == canonical_json_digest(raw_receipt)
+    assert b"-0.0" not in canonical_json_bytes({"z": -0.0})
+
+    failed_receipt = TrainReceiptV1(
+        protocol_version=TRAINER_PROTOCOL_VERSION,
+        status="failed",
+        failure_code="oom",
+        failure_message="CUDA out of memory",
+    )
+    assert failed_receipt.failure_code == "oom"
+
+    preview_spec = PreviewSpecV1(
+        protocol_version=TRAINER_PROTOCOL_VERSION,
+        preview_id="preview-1",
+        framework_id="example-trainer",
+        task="detect",
+        architecture_id="demo-n",
+        input_digest=DIGEST_E,
+        config_digest=DIGEST_A,
+        dataset_snapshot_digest=DIGEST_B,
+        policy_digest=DIGEST_C,
+        seed=42,
+        epoch=1,
+        count=2,
+        sources=[
+            PreviewSourceV1(
+                task_id="task-1",
+                filename="images/a.jpg",
+                sha256=DIGEST_D,
+                width=640,
+                height=480,
+                size_bytes=12345,
+                box_count=3,
+                label_path="labels/a.txt",
+                label_sha256=DIGEST_A,
+            )
+        ],
+        parameters={"mosaic": 0.5},
+        native_values={"device": "cpu", "workers": 0},
+        pool_summary={"candidate_count": 1},
+    )
+    preview_report = PreviewReportV1(
+        protocol_version=TRAINER_PROTOCOL_VERSION,
+        status="succeeded",
+        input_digest=preview_spec.input_digest,
+        policy_digest=DIGEST_C,
+        cuda_initialized=False,
+        outputs=[
+            PreviewOutputV1(
+                filename="preview-0.png",
+                sha256=DIGEST_A,
+                size_bytes=4096,
+                width=640,
+                height=640,
+                box_count=3,
+                metadata={"clipped": 0, "filtered": 0},
+            )
+        ],
+        runtime={"cpu_only": True},
+        details={"mosaic_closed": False},
+    )
+    assert preview_report.cuda_initialized is False
+
+    failed_preview = PreviewReportV1(
+        protocol_version=TRAINER_PROTOCOL_VERSION,
+        status="failed",
+        input_digest=preview_spec.input_digest,
+        policy_digest=DIGEST_C,
+        failure_code="preview_timeout",
+        failure_message="exceeded 45s",
+    )
+    assert failed_preview.status == "failed"
+
+    def _boom(_src: str, _dst: Path) -> None:
+        raise RuntimeError("simulated replace error")
+
+    monkeypatch.setattr(os, "replace", _boom)
+    fail_target = tmp_path / "cleanup" / "atomic.json"
+    with pytest.raises(RuntimeError, match="simulated replace error"):
+        atomic_write_json(fail_target, {"ok": True})
+    assert not fail_target.exists()
+    assert not list(fail_target.parent.glob(".tmp-*"))
+
+
+def test_trainer_models_emit_valid_json_schema_with_required_protocol_version() -> None:
+    for model_cls in (
+        TrainerCapabilitiesV1,
+        ValidateConfigResultV1,
+        TrainSpecV1,
+        TrainReceiptV1,
+        PreviewSpecV1,
+        PreviewReportV1,
+    ):
+        schema = model_cls.model_json_schema()
+        assert "protocol_version" in schema.get("required", [])
+        keys = _collect_schema_keys(schema)
+        assert "ge" not in keys
+        assert "le" not in keys
+
+    event_schema = TrainEventV1.model_json_schema()
+    event_keys = _collect_schema_keys(event_schema)
+    assert "ge" not in event_keys
+    assert "le" not in event_keys
+    progress_any_of = event_schema["properties"]["progress"]["anyOf"]
+    number_branch = next(item for item in progress_any_of if item.get("type") == "number")
+    assert number_branch["minimum"] == 0.0
+    assert number_branch["maximum"] == 1.0
+
+
+def test_trainer_protocol_negative_invariants(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError):
+        ServingCompatibilityV1(framework="demo", format="")
+    with pytest.raises(ValidationError):
+        ServingCompatibilityV1(framework="demo", format="   ")
+    with pytest.raises(ValidationError):
+        ServingCompatibilityV1.model_validate({"framework": "demo"})
+    with pytest.raises(ValidationError):
+        ServingCompatibilityV1.model_validate({"framework": "demo", "format": None, "extra": 1})
 
     with pytest.raises(ValidationError):
-        ServingCompatibilityV1(framework="ultralytics", format="")
+        TrainReceiptV1.model_validate({"status": "cancelled"})
     with pytest.raises(ValidationError):
-        ServingCompatibilityV1(framework="ultralytics", format="   ")
+        TrainerArchitectureV1(
+            id="demo-n",
+            family="demo",
+            tasks=["detect"],
+            base_asset_sha256=DIGEST_A,
+        )
     with pytest.raises(ValidationError):
-        ServingCompatibilityV1.model_validate({"framework": "ultralytics"})
+        TrainerCapabilitiesV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
+            framework_id="demo",
+            framework_version="1.0.0",
+            supported_tasks=["detect"],
+            supported_dataset_contracts=["bbox-v1"],
+            architectures=[
+                TrainerArchitectureV1(id="demo-n", family="demo", tasks=["segment"])
+            ],
+        )
+    with pytest.raises(ValidationError):
+        TrainerCapabilitiesV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
+            framework_id="demo",
+            framework_version="1.0.0",
+            runtime_versions={" bad": "1.0"},
+            supported_tasks=["detect"],
+            supported_dataset_contracts=["bbox-v1"],
+            architectures=[
+                TrainerArchitectureV1(id="demo-n", family="demo", tasks=["detect"])
+            ],
+        )
+    with pytest.raises(ValidationError):
+        TrainerCapabilitiesV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
+            framework_id="demo",
+            framework_version="1.0.0",
+            supported_tasks=["detect"],
+            supported_dataset_contracts=["bbox-v1"],
+            architectures=[
+                TrainerArchitectureV1(id="demo-n", family="demo", tasks=["detect"])
+            ],
+            policy_digests={"budget": "not-a-sha"},
+        )
+
+    with pytest.raises(ValidationError):
+        ValidateConfigResultV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
+            valid=True,
+            schema_id="s-1",
+        )
+    with pytest.raises(ValidationError):
+        ValidateConfigResultV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
+            valid=True,
+            schema_id="s-1",
+            schema_digest=DIGEST_A,
+            issues=[ValidationIssueV1(code="err", message="bad")],
+        )
+    with pytest.raises(ValidationError):
+        ValidateConfigResultV1(protocol_version=TRAINER_PROTOCOL_VERSION, valid=False)
+
     with pytest.raises(ValidationError):
         TrainSpecV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
             run_id="run-1",
             attempt_id="attempt-1",
-            framework_id="ultralytics",
+            framework_id="demo",
             task="detect",
-            architecture_id="yolo11n",
-            dataset_contract="ultralytics-bbox-1",
+            architecture_id="demo-n",
+            dataset_contract="bbox-v1",
             dataset_dir="/work/input/dataset",
+            dataset_snapshot_digest=DIGEST_A,
+            config_digest=DIGEST_B,
+            classes_digest=DIGEST_C,
             resume_checkpoint_path="/work/input/resume.pt",
             init_weights_path="/work/input/init.pt",
         )
-    bad_path = tmp_path / "nan.json"
+    with pytest.raises(ValidationError):
+        TrainSpecV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
+            run_id="run-1",
+            attempt_id="attempt-1",
+            framework_id="demo",
+            task="detect",
+            architecture_id="demo-n",
+            dataset_contract="bbox-v1",
+            dataset_dir="/work/input/dataset",
+            dataset_snapshot_digest=DIGEST_A,
+            config_digest=DIGEST_B,
+            classes_digest=DIGEST_C,
+            schema_id="only-id",
+        )
+
+    with pytest.raises(ValidationError):
+        TrainEventV1(seq=1, kind="epoch", epoch=5, total_epochs=3)
+    with pytest.raises(ValidationError):
+        TrainEventV1(seq=1, kind="progress", progress=float("nan"))
+    with pytest.raises(ValidationError):
+        TrainEventV1.model_validate({"seq": 1, "kind": "progress", "progress": True})
+    with pytest.raises(ValueError):
+        write_event_jsonl(
+            tmp_path / "never-created" / "events.jsonl",
+            TrainEventV1(seq=1, kind="epoch", metrics={"loss": float("nan")}),
+        )
+    assert not (tmp_path / "never-created").exists()
+
+    with pytest.raises(ValidationError):
+        TrainArtifactV1(
+            role="weights",
+            filename="../escape.pt",
+            sha256=DIGEST_A,
+            size_bytes=10,
+        )
+    with pytest.raises(ValidationError):
+        TrainReceiptV1(protocol_version=TRAINER_PROTOCOL_VERSION, status="failed")
+    with pytest.raises(ValidationError):
+        TrainReceiptV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
+            status="succeeded",
+            failure_code="unexpected",
+        )
+
+    with pytest.raises(ValidationError):
+        PreviewSourceV1(
+            task_id="t-1",
+            filename="../secret.jpg",
+            sha256=DIGEST_A,
+            width=100,
+            height=100,
+            size_bytes=100,
+            box_count=0,
+        )
+    with pytest.raises(ValidationError):
+        PreviewSourceV1(
+            task_id="t-1",
+            filename="images/huge.jpg",
+            sha256=DIGEST_A,
+            width=5000,
+            height=4000,
+            size_bytes=100,
+            box_count=0,
+        )
+    with pytest.raises(ValidationError):
+        PreviewSourceV1(
+            task_id="t-1",
+            filename="images/a.jpg",
+            sha256=DIGEST_A,
+            width=100,
+            height=100,
+            size_bytes=100,
+            box_count=0,
+            label_path="labels/a.txt",
+        )
+    with pytest.raises(ValidationError):
+        PreviewSpecV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
+            preview_id="p-oversize",
+            framework_id="demo",
+            task="detect",
+            architecture_id="demo-n",
+            input_digest=DIGEST_E,
+            config_digest=DIGEST_A,
+            dataset_snapshot_digest=DIGEST_B,
+            policy_digest=DIGEST_C,
+            seed=1,
+            epoch=1,
+            count=1,
+            sources=[
+                PreviewSourceV1(
+                    task_id=f"t-{idx}",
+                    filename=f"images/{idx}.jpg",
+                    sha256=DIGEST_D,
+                    width=100,
+                    height=100,
+                    size_bytes=PREVIEW_MAX_SOURCE_BYTES,
+                    box_count=0,
+                )
+                for idx in range((PREVIEW_MAX_POOL_BYTES // PREVIEW_MAX_SOURCE_BYTES) + 1)
+            ],
+        )
+    with pytest.raises(ValidationError):
+        PreviewReportV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
+            status="succeeded",
+            input_digest=DIGEST_A,
+            policy_digest=DIGEST_B,
+            cuda_initialized=True,
+            outputs=[
+                PreviewOutputV1(
+                    filename="p0.png",
+                    sha256=DIGEST_C,
+                    size_bytes=100,
+                    width=64,
+                    height=64,
+                    box_count=1,
+                )
+            ],
+        )
+    with pytest.raises(ValidationError):
+        PreviewReportV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
+            status="succeeded",
+            input_digest=DIGEST_A,
+            policy_digest=DIGEST_B,
+            outputs=[],
+        )
+    with pytest.raises(ValidationError):
+        PreviewReportV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
+            status="failed",
+            input_digest=DIGEST_A,
+            policy_digest=DIGEST_B,
+        )
+
+    bad_dir = tmp_path / "never-mkdir"
+    bad_path = bad_dir / "nan.json"
     with pytest.raises(ValueError):
         atomic_write_json(bad_path, {"loss": float("nan")})
-    assert not bad_path.exists()
-    assert not list(tmp_path.glob(".tmp-*"))
+    assert not bad_dir.exists()
