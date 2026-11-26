@@ -165,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="yoao-plugin",
         description=(
-            "Universal YOAO plugin CLI (version, validate, init) plus inference "
+            "Universal YOAO plugin CLI (version, validate, init, trainer) plus inference "
             "authoring commands (dev, check, build)."
         ),
     )
@@ -186,9 +186,58 @@ def main(argv: list[str] | None = None) -> int:
     init_p.add_argument(
         "--example",
         action="store_true",
-        help="For inference plugins, also scaffold the runnable CPU color-region demo package.",
+        help=(
+            "Scaffold a runnable CPU example package (supported for inference and trainer)."
+        ),
     )
     init_p.add_argument("target_dir", type=Path)
+
+    trainer_p = sub.add_parser("trainer", help="Trainer plugin verification tools (yoao-trainer/v1)")
+    trainer_sub = trainer_p.add_subparsers(dest="trainer_command", required=True)
+    trainer_check_p = trainer_sub.add_parser(
+        "check",
+        help="Verify a yoao-trainer/v1 plugin entrypoint offline against synthetic read-only data.",
+    )
+    trainer_check_p.add_argument(
+        "--entrypoint",
+        default=None,
+        help="Trainer plugin command string or executable path (defaults to manifest entrypoint).",
+    )
+    trainer_check_p.add_argument(
+        "--arg",
+        dest="entrypoint_args",
+        action="append",
+        default=[],
+        help="Extra argument appended to --entrypoint (repeatable).",
+    )
+    trainer_check_p.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="Optional yoao-extension-manifest/v1 JSON file to validate alongside the entrypoint.",
+    )
+    trainer_check_p.add_argument(
+        "--skip-train",
+        action="store_true",
+        help="Skip train, input_membership, and SIGTERM cancel probes.",
+    )
+    trainer_check_p.add_argument(
+        "--preview",
+        action="store_true",
+        help="Also verify the CPU-only preview subcommand.",
+    )
+    trainer_check_p.add_argument(
+        "--timeout",
+        type=float,
+        default=60.0,
+        help="Per-subcommand timeout in seconds (default: 60).",
+    )
+    trainer_check_p.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="Optional path to write the canonical JSON check report.",
+    )
 
     sub.add_parser("dev", help="Run a local inference plugin development server (requires [inference])")
     sub.add_parser("check", help="Check an inference plugin endpoint or run local GPU qualification")
@@ -217,8 +266,57 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    if args.command == "trainer" and args.trainer_command == "check":
+        import shlex
+
+        from yoao_plugin_sdk.trainer.check import check_trainer_plugin
+        from yoao_plugin_sdk.trainer.files import atomic_write_json
+        from yoao_plugin_sdk.trainer.protocol import canonical_json_bytes
+
+        cmd: list[str] = []
+        if args.entrypoint:
+            cmd = shlex.split(args.entrypoint)
+        elif args.manifest is not None:
+            try:
+                loaded_manifest = load_manifest_file(args.manifest)
+            except Exception as exc:
+                print(f"Failed to read manifest for default entrypoint: {exc}", file=sys.stderr)
+                return 1
+            if loaded_manifest.entrypoint:
+                cmd = list(loaded_manifest.entrypoint)
+        cmd.extend(args.entrypoint_args)
+        if not cmd:
+            print(
+                "yoao-plugin trainer check requires --entrypoint or a --manifest with entrypoint",
+                file=sys.stderr,
+            )
+            return 2
+
+        report = check_trainer_plugin(
+            cmd,
+            manifest_path=args.manifest,
+            skip_train=bool(args.skip_train),
+            check_preview=bool(args.preview),
+            timeout_seconds=float(args.timeout),
+        )
+        if args.report is not None:
+            atomic_write_json(args.report, report)
+        sys.stdout.write(canonical_json_bytes(report).decode("utf-8") + "\n")
+        sys.stdout.flush()
+        return 0 if report.passed else 1
+
     if args.command == "init":
         target: Path = args.target_dir
+        if args.example and args.extension_point == "trainer":
+            from yoao_plugin_sdk.trainer._scaffold import init_trainer_example
+
+            try:
+                init_trainer_example(target)
+            except FileExistsError:
+                print(f"Refusing to overwrite existing directory {target}", file=sys.stderr)
+                return 1
+            print(f"Scaffolded trainer example plugin at {target}")
+            return 0
         use_example = bool(args.example and args.extension_point == "inference")
         if use_example:
             from yoao_plugin_sdk.inference._scaffold import init_project

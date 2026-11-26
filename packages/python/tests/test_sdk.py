@@ -97,6 +97,54 @@ def test_cli_version_and_inference_example_scaffold(tmp_path: Path) -> None:
     assert cli_main(["init", "--type", "inference", "--example", str(target)]) == 1
 
 
+def test_cli_trainer_example_scaffold_and_trainer_check(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import sys
+
+    target = tmp_path / "my-cpu-trainer"
+    assert cli_main(["init", "--type", "trainer", "--example", str(target)]) == 0
+    assert (target / "manifest.json").is_file()
+    assert (target / "pyproject.toml").is_file()
+    assert (target / "demo_trainer.py").is_file()
+    assert (target / "tests" / "test_demo_trainer.py").is_file()
+    assert cli_main(["validate", str(target / "manifest.json")]) == 0
+    assert cli_main(["init", "--type", "trainer", "--example", str(target)]) == 1
+
+    capsys.readouterr()
+    report_path = tmp_path / "trainer-check-report.json"
+    rc = cli_main(
+        [
+            "trainer",
+            "check",
+            "--manifest",
+            str(target / "manifest.json"),
+            "--entrypoint",
+            sys.executable,
+            "--arg",
+            str(target / "demo_trainer.py"),
+            "--preview",
+            "--report",
+            str(report_path),
+        ]
+    )
+    assert rc == 0
+    stdout_report = json.loads(capsys.readouterr().out)
+    file_report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert stdout_report == file_report
+    assert file_report["passed"] is True
+    for check_name in (
+        "manifest",
+        "describe",
+        "validate_config",
+        "train",
+        "input_membership",
+        "cancel",
+        "preview",
+    ):
+        assert file_report["checks"][check_name]["passed"] is True
+
+
 def test_manifest_rejects_shell_entrypoint_and_self_reported_source_tier() -> None:
     with pytest.raises(ValidationError):
         ExtensionManifestV1.model_validate(
