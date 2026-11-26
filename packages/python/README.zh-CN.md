@@ -12,10 +12,10 @@ YOAO 统一 Python 插件开发包（`requires-python >= 3.10`），覆盖全部
 - **鉴权辅助**（`yoao_plugin_sdk.auth`）：提供恒定时间 Bearer 鉴权 `verify_bearer_token` 与支持直传环境变量或 `*_FILE` 的只读凭据读取 `read_secret`。
 - **各扩展点协议模型**：
   - `yoao_plugin_sdk.inference`：`yoao-inference/v2` 清单模型与能力常量。
-  - `yoao_plugin_sdk.trainer`：`yoao-trainer/v1` 契约模型（`TrainerCapabilitiesV1`、`ValidateConfigResultV1`、`TrainSpecV1`、`TrainEventV1`、`TrainReceiptV1`、`PreviewSpecV1`、`PreviewReportV1` 等）、规范化 JSON 摘要（`canonical_json_bytes`、`canonical_json_digest`）及原子写入工具（`atomic_write_json`、`write_event_jsonl`）。
+  - `yoao_plugin_sdk.trainer`：`yoao-trainer/v1` 契约模型（`TrainerCapabilitiesV1`、`ValidateConfigResultV1`、`TrainSpecV1`、`TrainEventV1`、`TrainReceiptV1`、`PreviewSpecV1`、`PreviewReportV1` 等）、原子文件与不可变产物工具（`digest_file`、`atomic_write_bytes`、`atomic_write_json`、`immutable_copy`、`sync_directory`）、结构化异常与 OOM 分类（`TrainerError`、`InputMismatchError`、`NativeConfigurationMismatch`、`NativeRuntimeMismatch`、`DatasetContractError`、`classify_failure`、`sanitize_failure_message`）、训练运行时辅助（`EventEmitter`、`CheckpointSlotStore`、`SUPERVISOR_OWNED_ARTIFACTS`、`build_artifact_entry`、`load_dataset_identity`、`run_with_signal_receipt`）、冻结输入成员证明器（`InputMembership`、`POLICY_DIGEST`）、纯标准库数据集与谱系校验（`validate_source_lineage`、`validate_frozen_manifest_core`、`validate_sample_files`、`validate_yolo_bbox_label`）、严格参数与指标工具（`validate_value`、`normalized`、`metrics_of`、`hash_source_files`），以及 `TrainerPlugin` CLI 驱动（`run_trainer_cli`、`build_trainer_parser`）。
   - `yoao_plugin_sdk.notification`：`yoao-notification-channel/v1` 模型（`DeliveryEnvelope`、`DeliverRequest`、`DeliverResult`）。
   - `yoao_plugin_sdk.format_adapter`：`yoao-format-adapter/v1` 模型（`ParsedAnnotation`、`ParsedItem`、`ImportParseResponse`）。
-- **基础 CLI**（`yoao-plugin`）：`version`、`init`、`validate`。
+- **基础 CLI**（`yoao-plugin`）：`version`、`init`（支持 `--type trainer --example`）、`validate` 与 `trainer check`。
 
 ### 可选依赖（extras）
 
@@ -55,8 +55,10 @@ python -m pip install "yoao-plugin-sdk[inference-runtime,mask]"
 
 ```sh
 yoao-plugin version
-yoao-plugin init --type trainer ./my-trainer-plugin
+yoao-plugin init --type trainer --example ./my-trainer-plugin
 yoao-plugin validate ./my-trainer-plugin/manifest.json
+python -m pip install --no-deps --no-build-isolation ./my-trainer-plugin
+yoao-plugin trainer check --manifest ./my-trainer-plugin/manifest.json --entrypoint my-trainer-plugin --preview
 
 # 生成 CPU 颜色区域检测示例（运行示例需要安装 [inference]）
 yoao-plugin init --type inference --example ./my-detector-plugin
@@ -75,8 +77,8 @@ yoao-plugin build --help
 在 `packages/python` 目录下运行：
 
 ```sh
-# 核心测试（基础包 + [dev]）
-python -m pytest tests/test_sdk.py
+# 核心与训练器 SDK 测试（基础包 + [dev]）
+python -m pytest tests/test_sdk.py tests/trainer
 
 # 掩码工具测试（[mask,dev]）
 python -m pytest --import-mode=importlib tests/mask_utils

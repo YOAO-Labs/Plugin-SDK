@@ -25,7 +25,7 @@ Python plugins on Python 3.10, 3.11, or 3.12 install the single `yoao-plugin-sdk
 
 | Extra | Module namespace | Scope |
 | --- | --- | --- |
-| Base (`yoao-plugin-sdk`) | `yoao_plugin_sdk.{manifest,auth,cli,inference,trainer,notification,format_adapter}` | Manifest validation, auth helpers, `yoao-plugin` base commands, and protocol models (`pydantic>=2.5` only) |
+| Base (`yoao-plugin-sdk`) | `yoao_plugin_sdk.{manifest,auth,cli,inference,trainer,notification,format_adapter}` | Manifest validation, auth helpers, `yoao-plugin` base commands (`version`, `validate`, `init`, `trainer check`), protocol models, and dependency-free trainer runtime components (`pydantic>=2.5` only) |
 | `[inference-runtime]` | `yoao_plugin_sdk.inference.runtime` | Model LRU pool, tracker sessions, managed GPU lifecycle, and `plugin_service` route and auth helpers |
 | `[inference]` | `yoao_plugin_sdk.inference`, `yoao_plugin_sdk.inference.authoring` | Detection authoring API (`create_detection_app`) and `yoao-plugin` `dev`, `check`, and `build` commands |
 | `[mask]` | `yoao_plugin_sdk.inference.mask_utils` | Mask-to-polygon conversion, COCO RLE codecs, and prompt adapters |
@@ -49,9 +49,11 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e "packages/python[dev]"
 yoao-plugin version
-yoao-plugin init --type trainer ./my-trainer-plugin
+yoao-plugin init --type trainer --example ./my-trainer-plugin
 yoao-plugin validate ./my-trainer-plugin/manifest.json
-python -m pytest packages/python/tests/test_sdk.py scripts/test_fetch_contracts.py
+python -m pip install --no-deps --no-build-isolation ./my-trainer-plugin
+yoao-plugin trainer check --manifest ./my-trainer-plugin/manifest.json --entrypoint my-trainer-plugin --preview
+python -m pytest packages/python/tests/test_sdk.py packages/python/tests/trainer scripts/test_fetch_contracts.py
 ```
 
 To test the mask utilities extra, install `packages/python[mask,dev]` and run `python -m pytest --import-mode=importlib packages/python/tests/mask_utils`. For package details, CLI subcommands, and inference extras, see [`packages/python/README.md`](packages/python/README.md).

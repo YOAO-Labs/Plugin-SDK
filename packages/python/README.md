@@ -12,10 +12,10 @@ Unified Python SDK (`requires-python >= 3.10`) for authoring YOAO plugins across
 - **Auth helpers** (`yoao_plugin_sdk.auth`): `verify_bearer_token` for constant-time Bearer token comparison and `read_secret` for direct or `*_FILE` secret loading.
 - **Protocol models**:
   - `yoao_plugin_sdk.inference`: `yoao-inference/v2` manifest models and capability constants.
-  - `yoao_plugin_sdk.trainer`: `yoao-trainer/v1` contract models (`TrainerCapabilitiesV1`, `ValidateConfigResultV1`, `TrainSpecV1`, `TrainEventV1`, `TrainReceiptV1`, `PreviewSpecV1`, `PreviewReportV1`, and related types), canonical JSON hashing (`canonical_json_bytes`, `canonical_json_digest`), and atomic writers (`atomic_write_json`, `write_event_jsonl`).
+  - `yoao_plugin_sdk.trainer`: `yoao-trainer/v1` contract models (`TrainerCapabilitiesV1`, `ValidateConfigResultV1`, `TrainSpecV1`, `TrainEventV1`, `TrainReceiptV1`, `PreviewSpecV1`, `PreviewReportV1`, and related types), atomic file I/O (`digest_file`, `atomic_write_bytes`, `atomic_write_json`, `immutable_copy`, `sync_directory`), structured errors (`TrainerError`, `InputMismatchError`, `NativeConfigurationMismatch`, `NativeRuntimeMismatch`, `DatasetContractError`, `classify_failure`, `sanitize_failure_message`), runtime helpers (`EventEmitter`, `CheckpointSlotStore`, `SUPERVISOR_OWNED_ARTIFACTS`, `build_artifact_entry`, `load_dataset_identity`, `run_with_signal_receipt`), frozen input membership prover (`InputMembership`, `POLICY_DIGEST`), pure-stdlib dataset and lineage checks (`validate_source_lineage`, `validate_frozen_manifest_core`, `validate_sample_files`, `validate_yolo_bbox_label`), strict schema and metric helpers (`validate_value`, `normalized`, `metrics_of`, `hash_source_files`), and the `TrainerPlugin` CLI driver (`run_trainer_cli`, `build_trainer_parser`).
   - `yoao_plugin_sdk.notification`: `yoao-notification-channel/v1` models (`DeliveryEnvelope`, `DeliverRequest`, `DeliverResult`).
   - `yoao_plugin_sdk.format_adapter`: `yoao-format-adapter/v1` models (`ParsedAnnotation`, `ParsedItem`, `ImportParseResponse`).
-- **Base CLI** (`yoao-plugin`): `version`, `init`, and `validate`.
+- **Base CLI** (`yoao-plugin`): `version`, `init` (including `--type trainer --example`), `validate`, and `trainer check`.
 
 ### Optional extras
 
@@ -55,10 +55,12 @@ python -m pip install "yoao-plugin-sdk[inference-runtime,mask]"
 
 ```sh
 yoao-plugin version
-yoao-plugin init --type trainer ./my-trainer-plugin
+yoao-plugin init --type trainer --example ./my-trainer-plugin
 yoao-plugin validate ./my-trainer-plugin/manifest.json
+python -m pip install --no-deps --no-build-isolation ./my-trainer-plugin
+yoao-plugin trainer check --manifest ./my-trainer-plugin/manifest.json --entrypoint my-trainer-plugin --preview
 
-# Scaffold the runnable CPU color-region detection demo (running it requires [inference])
+# Generate the runnable CPU color-region detection demo (running it requires [inference])
 yoao-plugin init --type inference --example ./my-detector-plugin
 ```
 
@@ -75,8 +77,8 @@ yoao-plugin build --help
 From `packages/python`:
 
 ```sh
-# Core tests (base + [dev])
-python -m pytest tests/test_sdk.py
+# Core and trainer SDK tests (base + [dev])
+python -m pytest tests/test_sdk.py tests/trainer
 
 # Mask utilities tests ([mask,dev])
 python -m pytest --import-mode=importlib tests/mask_utils

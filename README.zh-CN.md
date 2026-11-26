@@ -25,7 +25,7 @@ Python 3.10、3.11 或 3.12 插件均安装统一的 `yoao-plugin-sdk` 分发包
 
 | Extra | 模块命名空间 | 适用范围 |
 | --- | --- | --- |
-| 基础包（`yoao-plugin-sdk`） | `yoao_plugin_sdk.{manifest,auth,cli,inference,trainer,notification,format_adapter}` | 清单校验、鉴权辅助、`yoao-plugin` 基础命令与各扩展点协议模型（仅依赖 `pydantic>=2.5`） |
+| 基础包（`yoao-plugin-sdk`） | `yoao_plugin_sdk.{manifest,auth,cli,inference,trainer,notification,format_adapter}` | 清单校验、鉴权辅助、`yoao-plugin` 基础命令（`version`、`validate`、`init`、`trainer check`）、各扩展点协议模型与零 ML 依赖的训练器公共运行时组件（仅依赖 `pydantic>=2.5`） |
 | `[inference-runtime]` | `yoao_plugin_sdk.inference.runtime` | 模型 LRU 池、有状态追踪会话、受管 GPU 生命周期与 `plugin_service` 路由及鉴权集成 |
 | `[inference]` | `yoao_plugin_sdk.inference`、`yoao_plugin_sdk.inference.authoring` | 检测插件开发接口（`create_detection_app`）及 `yoao-plugin` 的 `dev`、`check`、`build` 命令 |
 | `[mask]` | `yoao_plugin_sdk.inference.mask_utils` | 掩码转多边形、COCO RLE 编解码与交互式提示适配器 |
@@ -49,9 +49,11 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e "packages/python[dev]"
 yoao-plugin version
-yoao-plugin init --type trainer ./my-trainer-plugin
+yoao-plugin init --type trainer --example ./my-trainer-plugin
 yoao-plugin validate ./my-trainer-plugin/manifest.json
-python -m pytest packages/python/tests/test_sdk.py scripts/test_fetch_contracts.py
+python -m pip install --no-deps --no-build-isolation ./my-trainer-plugin
+yoao-plugin trainer check --manifest ./my-trainer-plugin/manifest.json --entrypoint my-trainer-plugin --preview
+python -m pytest packages/python/tests/test_sdk.py packages/python/tests/trainer scripts/test_fetch_contracts.py
 ```
 
 如需测试掩码工具 extra，安装 `packages/python[mask,dev]` 后运行 `python -m pytest --import-mode=importlib packages/python/tests/mask_utils`。更多模块说明、CLI 子命令及推理 extra 用法请参阅 [`packages/python/README.zh-CN.md`](packages/python/README.zh-CN.md)。
