@@ -77,7 +77,6 @@ py-modules = ["demo_trainer"]
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import platform
 import struct
@@ -102,6 +101,7 @@ from yoao_plugin_sdk.trainer import (
     TrainSpecV1,
     ValidateConfigResultV1,
     ValidationIssueV1,
+    atomic_write_bytes,
     atomic_write_json,
     build_artifact_entry,
     canonical_json_bytes,
@@ -403,7 +403,7 @@ class DemoTrainerPlugin:
         assert last_ckpt is not None
         emitter.phase("evaluating")
         weights_path = output_dir / "best.pt"
-        weights_path.write_bytes((output_dir / last_ckpt["name"]).read_bytes())
+        atomic_write_bytes(weights_path, (output_dir / last_ckpt["name"]).read_bytes())
 
         metrics_path = output_dir / "metrics.json"
         atomic_write_json(
@@ -447,7 +447,7 @@ class DemoTrainerPlugin:
     ) -> PreviewReportV1:
         output_dir.mkdir(parents=True, exist_ok=True)
         out_img = output_dir / "preview-0.png"
-        out_img.write_bytes(_encode_png(16, 16, (60, 140, 220)))
+        atomic_write_bytes(out_img, _encode_png(16, 16, (60, 140, 220)))
         report = PreviewReportV1(
             protocol_version=TRAINER_PROTOCOL_VERSION,
             status="succeeded",

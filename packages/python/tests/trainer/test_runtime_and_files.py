@@ -10,6 +10,7 @@ import types
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from yoao_plugin_sdk.trainer import (
     SUPERVISOR_OWNED_ARTIFACTS,
@@ -26,6 +27,7 @@ from yoao_plugin_sdk.trainer import (
     TrainReceiptV1,
     TrainSpecV1,
     atomic_write_bytes,
+    atomic_write_json,
     build_artifact_entry,
     classify_failure,
     digest_file,
@@ -344,3 +346,202 @@ def test_run_with_signal_receipt_success_cancel_and_cuda_oom(
     assert receipt_oom.status == "failed"
     assert receipt_oom.failure_code == "cuda_oom"
     assert receipt_oom.failure_message == "CUDA out of memory allocated 24GiB"
+
+
+def test_immutable_copy_rejects_symlinks_non_files_and_missing_source(tmp_path: Path) -> None:
+    src = tmp_path / "src.bin"
+    src.write_bytes(b"payload")
+
+    # Live symlink destination rejected even when target content matches.
+    target_real = tmp_path / "real.bin"
+    target_real.write_bytes(b"payload")
+    live_link = tmp_path / "out" / "live.pt"
+    live_link.parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(target_real, live_link)
+    with pytest.raises(ValueError, match="symlink"):
+        immutable_copy(src, live_link)
+
+    # Dangling symlink destination rejected before exists().
+    dangling_link = tmp_path / "out" / "dangling.pt"
+    os.symlink(tmp_path / "does-not-exist.bin", dangling_link)
+    with pytest.raises(ValueError, match="symlink"):
+        immutable_copy(src, dangling_link)
+
+    # Non-regular file (directory) destination rejected.
+    dir_dst = tmp_path / "out" / "dir.pt"
+    dir_dst.mkdir()
+    with pytest.raises(ValueError, match="regular file"):
+        immutable_copy(src, dir_dst)
+
+    # Missing source fails before creating a temp file in destination directory.
+    clean_dir = tmp_path / "clean-out"
+    with pytest.raises(FileNotFoundError):
+        immutable_copy(tmp_path / "missing.bin", clean_dir / "best.pt")
+    assert not list(clean_dir.glob(".tmp-*"))
+
+
+def test_atomic_writers_handle_ebadf_after_fdopen_and_unlink_tmp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_fdopen = os.fdopen
+
+    def _fdopen_close_then_interrupt(fd: int, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        # Simulate ownership transfer closing fd right before an async KeyboardInterrupt.
+        stream = real_fdopen(fd, mode, *args, **kwargs)
+        stream.close()
+        raise KeyboardInterrupt("async cancel right after fdopen")
+
+    monkeypatch.setattr(os, "fdopen", _fdopen_close_then_interrupt)
+
+    bytes_dir = tmp_path / "bytes-case"
+    with pytest.raises(KeyboardInterrupt, match="async cancel"):
+        atomic_write_bytes(bytes_dir / "a.bin", b"abc")
+    assert not list(bytes_dir.glob(".tmp-*"))
+
+    json_dir = tmp_path / "json-case"
+    with pytest.raises(KeyboardInterrupt, match="async cancel"):
+        atomic_write_json(json_dir / "a.json", {"ok": True})
+    assert not list(json_dir.glob(".tmp-*"))
+
+    src = tmp_path / "copy-src.bin"
+    src.write_bytes(b"copy-data")
+    copy_dir = tmp_path / "copy-case"
+    with pytest.raises(KeyboardInterrupt, match="async cancel"):
+        immutable_copy(src, copy_dir / "a.bin")
+    assert not list(copy_dir.glob(".tmp-*"))
+
+
+def test_event_emitter_epoch_zero_total_raises_validation_error(tmp_path: Path) -> None:
+    emitter = EventEmitter(tmp_path)
+    with pytest.raises(ValidationError):
+        emitter.epoch(epoch=0, total_epochs=0, metrics={})
+    with pytest.raises(ValidationError):
+        emitter.epoch(epoch=1, total_epochs=-2, metrics={})
+    assert emitter.seq == 0
+    assert not emitter.path.exists()
+
+
+def test_classify_failure_sanitizes_untrusted_failure_code(tmp_path: Path) -> None:
+    dirty = TrainerError("boom", failure_code="  \x00bad\ncode\t\x7f" + ("x" * 100))
+    code = classify_failure(dirty)
+    assert len(code) <= 64
+    assert code == code.strip()
+    assert not any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in code)
+
+    # Trailing space at index 64 must be stripped cleanly.
+    boundary = TrainerError("boom", failure_code=("a" * 63) + " bcd")
+    assert classify_failure(boundary) == "a" * 63
+
+    # Control-only or whitespace-only falls back to native_exception.
+    assert classify_failure(TrainerError("boom", failure_code=" \x00\n\t\x7f ")) == "native_exception"
+
+    # End-to-end: run_with_signal_receipt persists valid TrainReceiptV1 without ValidationError.
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(_sample_spec(tmp_path / "dataset")), encoding="utf-8")
+    out_dir = tmp_path / "out-dirty-code"
+
+    def _run_dirty(spec: TrainSpecV1, output_dir: Path, sp: Path) -> TrainReceiptV1:
+        raise dirty
+
+    assert run_with_signal_receipt(spec_path, out_dir, _run_dirty) == 1
+    receipt = TrainReceiptV1.model_validate_json((out_dir / "result.json").read_text(encoding="utf-8"))
+    assert receipt.status == "failed"
+    assert receipt.failure_code == code
+
+
+def test_run_with_signal_receipt_reentrant_sigterm_stale_receipt_and_partial_signal_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(_sample_spec(tmp_path / "dataset")), encoding="utf-8")
+    before_sigterm = signal.getsignal(signal.SIGTERM)
+    before_sigint = signal.getsignal(signal.SIGINT)
+
+    # 1. Stale result.json is overwritten when run_fn returns a fresh TrainReceiptV1.
+    out_stale = tmp_path / "out-stale"
+    out_stale.mkdir(parents=True, exist_ok=True)
+    stale_receipt = TrainReceiptV1(
+        protocol_version=TRAINER_PROTOCOL_VERSION,
+        status="failed",
+        failure_code="stale_error",
+        failure_message="from earlier run",
+    )
+    atomic_write_json(out_stale / "result.json", stale_receipt)
+
+    def _run_fresh(spec: TrainSpecV1, output_dir: Path, sp: Path) -> TrainReceiptV1:
+        return TrainReceiptV1(
+            protocol_version=TRAINER_PROTOCOL_VERSION,
+            status="succeeded",
+            artifacts=[],
+        )
+
+    assert run_with_signal_receipt(spec_path, out_stale, _run_fresh) == 0
+    fresh_written = TrainReceiptV1.model_validate_json(
+        (out_stale / "result.json").read_text(encoding="utf-8")
+    )
+    assert fresh_written.status == "succeeded"
+
+    # 2. Re-entrant SIGTERM during terminal receipt write does not abort persistence.
+    real_atomic_write_json = runtime_mod.atomic_write_json
+    sent_reentrant = {"count": 0}
+
+    def _reentrant_write(path: Any, payload: Any, **kwargs: Any) -> None:
+        sent_reentrant["count"] += 1
+        os.kill(os.getpid(), signal.SIGTERM)
+        os.kill(os.getpid(), signal.SIGINT)
+        real_atomic_write_json(path, payload, **kwargs)
+
+    monkeypatch.setattr(runtime_mod, "atomic_write_json", _reentrant_write)
+
+    out_cancel = tmp_path / "out-reentrant-cancel"
+
+    def _run_cancel(spec: TrainSpecV1, output_dir: Path, sp: Path) -> TrainReceiptV1:
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise AssertionError("unreachable")
+
+    assert run_with_signal_receipt(spec_path, out_cancel, _run_cancel) == 130
+    assert sent_reentrant["count"] == 1
+    assert signal.getsignal(signal.SIGTERM) is before_sigterm
+    assert signal.getsignal(signal.SIGINT) is before_sigint
+    assert (
+        TrainReceiptV1.model_validate_json(
+            (out_cancel / "result.json").read_text(encoding="utf-8")
+        ).status
+        == "cancelled"
+    )
+
+    out_fail = tmp_path / "out-reentrant-fail"
+
+    def _run_fail(spec: TrainSpecV1, output_dir: Path, sp: Path) -> TrainReceiptV1:
+        raise RuntimeError("boom during train")
+
+    assert run_with_signal_receipt(spec_path, out_fail, _run_fail) == 1
+    assert sent_reentrant["count"] == 2
+    assert signal.getsignal(signal.SIGTERM) is before_sigterm
+    assert signal.getsignal(signal.SIGINT) is before_sigint
+    assert (
+        TrainReceiptV1.model_validate_json(
+            (out_fail / "result.json").read_text(encoding="utf-8")
+        ).status
+        == "failed"
+    )
+
+    monkeypatch.setattr(runtime_mod, "atomic_write_json", real_atomic_write_json)
+
+    # 3. Failed signal.signal install does not record previous handler for cleanup.
+    real_signal = signal.signal
+    calls: list[int] = []
+
+    def _reject_sigint(signum: int, handler: Any) -> Any:
+        calls.append(signum)
+        if signum == signal.SIGINT:
+            raise ValueError("not main thread")
+        return real_signal(signum, handler)
+
+    monkeypatch.setattr(signal, "signal", _reject_sigint)
+    out_partial = tmp_path / "out-partial-sig"
+    assert run_with_signal_receipt(spec_path, out_partial, _run_fresh) == 0
+    # SIGINT was attempted once during install and never touched again during finally cleanup.
+    assert calls.count(signal.SIGINT) == 1
+    assert calls.count(signal.SIGTERM) == 2
+    assert signal.getsignal(signal.SIGTERM) is before_sigterm

@@ -54,8 +54,6 @@ def validate_value(value: Any, rule: Mapping[str, Any]) -> None:
     if not valid:
         raise ValueError(f"Must be {kind} without implicit type conversion")
     if kind in {"number", "integer"}:
-        if type(value) is float and not math.isfinite(value):
-            raise ValueError("Must be a finite number")
         for key, predicate in (
             ("minimum", lambda bound: value >= bound),
             ("maximum", lambda bound: value <= bound),

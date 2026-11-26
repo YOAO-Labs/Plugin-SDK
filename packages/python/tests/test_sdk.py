@@ -144,6 +144,22 @@ def test_cli_trainer_example_scaffold_and_trainer_check(
     ):
         assert file_report["checks"][check_name]["passed"] is True
 
+    # Malformed --entrypoint quotes and non-finite/non-positive --timeout return exit code 2.
+    capsys.readouterr()
+    assert cli_main(["trainer", "check", "--entrypoint", '"unclosed']) == 2
+    assert "Invalid --entrypoint" in capsys.readouterr().err
+
+    capsys.readouterr()
+    assert cli_main(["trainer", "check", "--entrypoint", "echo", "--timeout", "nan"]) == 2
+    assert "Invalid --timeout" in capsys.readouterr().err
+
+    for bad_timeout in ("nan", "inf", "-inf", "0", "-5"):
+        capsys.readouterr()
+        assert (
+            cli_main(["trainer", "check", "--entrypoint", "echo", f"--timeout={bad_timeout}"]) == 2
+        )
+        assert "Invalid --timeout" in capsys.readouterr().err
+
 
 def test_manifest_rejects_shell_entrypoint_and_self_reported_source_tier() -> None:
     with pytest.raises(ValidationError):

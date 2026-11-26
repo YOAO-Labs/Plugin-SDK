@@ -108,11 +108,14 @@ class EventEmitter:
         phase: str = "training",
         detail: dict[str, Any] | None = None,
     ) -> TrainEventV1:
-        computed_progress = (
-            min(1.0, max(0.0, float(epoch) / float(total_epochs)))
-            if progress is None
-            else progress
-        )
+        if progress is None:
+            computed_progress = (
+                min(1.0, max(0.0, float(epoch) / float(total_epochs)))
+                if type(total_epochs) is int and total_epochs > 0 and type(epoch) is int
+                else None
+            )
+        else:
+            computed_progress = progress
         return self.emit(
             "epoch",
             phase=phase,
@@ -315,10 +318,18 @@ def run_with_signal_receipt(
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
-            previous_handlers[sig] = signal.getsignal(sig)
+            old = signal.getsignal(sig)
             signal.signal(sig, _handle_cancel)
+            previous_handlers[sig] = old
         except (ValueError, OSError):
             pass
+
+    def _ignore_cancel_signals() -> None:
+        for sig in previous_handlers:
+            try:
+                signal.signal(sig, signal.SIG_IGN)
+            except (ValueError, OSError):
+                pass
 
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -326,15 +337,14 @@ def run_with_signal_receipt(
         spec = TrainSpecV1.model_validate(raw)
         receipt = run_fn(spec, out_dir, sp)
         if isinstance(receipt, TrainReceiptV1):
-            result_path = out_dir / "result.json"
-            if not result_path.is_file():
-                atomic_write_json(result_path, receipt)
+            atomic_write_json(out_dir / "result.json", receipt)
             if receipt.status == "cancelled":
                 return 130
             if receipt.status == "failed":
                 return 1
         return 0
     except (_CancelledTraining, KeyboardInterrupt) as exc:
+        _ignore_cancel_signals()
         receipt = TrainReceiptV1(
             protocol_version=TRAINER_PROTOCOL_VERSION,
             status="cancelled",
@@ -344,6 +354,7 @@ def run_with_signal_receipt(
         _write_terminal_receipt(out_dir, receipt)
         return 130
     except Exception as exc:
+        _ignore_cancel_signals()
         code = classify_failure(exc)
         message = sanitize_failure_message(exc, type(exc).__name__)
         receipt = TrainReceiptV1(

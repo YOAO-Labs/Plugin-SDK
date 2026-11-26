@@ -8,6 +8,7 @@ import uuid
 import pytest
 
 from yoao_plugin_sdk.trainer import (
+    MAX_MEMBERS,
     POLICY_DIGEST,
     InputMembership,
     InputMembershipResult,
@@ -237,3 +238,103 @@ def test_input_membership_rejects_traversal_missing_split_mutation_and_duplicate
     }
     with pytest.raises(ValueError, match="duplicate"):
         member_records(dup_manifest)
+
+
+def test_input_membership_non_strict_rejects_missing_split_partial_task_id_and_oversized_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset_dir = tmp_path / "dataset"
+    output_dir = tmp_path / "output"
+
+    # Missing val split in require_identities=False must raise InputMismatchError.
+    only_train = {"samples": [_sample("train", "t0")]}
+    with pytest.raises(InputMismatchError, match="training and validation"):
+        InputMembership(
+            dataset_dir=dataset_dir,
+            output_dir=output_dir,
+            manifest=only_train,
+            run_id="run-1",
+            attempt_id="attempt-1",
+            config_digest=DIGEST_D,
+            require_identities=False,
+        )
+
+    # Partially populated task_id must NOT silently downgrade to non-proof mode.
+    partial_manifest = {
+        "samples": [
+            _sample("train", "t0", task_id=str(uuid.uuid4())),
+            _sample("val", "v0"),
+        ]
+    }
+    with pytest.raises(InputMismatchError):
+        InputMembership(
+            dataset_dir=dataset_dir,
+            output_dir=output_dir,
+            manifest=partial_manifest,
+            run_id="run-1",
+            attempt_id="attempt-1",
+            config_digest=DIGEST_D,
+            require_identities=False,
+        )
+
+    # Corrupted task_id (invalid UUID) must NOT silently downgrade to non-proof mode.
+    corrupted_manifest = {
+        "samples": [
+            _sample("train", "t0", task_id="not-a-uuid"),
+            _sample("val", "v0", task_id=str(uuid.uuid4())),
+        ]
+    }
+    with pytest.raises(InputMismatchError):
+        InputMembership(
+            dataset_dir=dataset_dir,
+            output_dir=output_dir,
+            manifest=corrupted_manifest,
+            run_id="run-1",
+            attempt_id="attempt-1",
+            config_digest=DIGEST_D,
+            require_identities=False,
+        )
+
+    # Explicit null task_id key also triggers identity enforcement instead of silent downgrade.
+    null_task_id_manifest = {
+        "samples": [
+            {**_sample("train", "t0"), "task_id": None},
+            _sample("val", "v0"),
+        ]
+    }
+    with pytest.raises(InputMismatchError):
+        InputMembership(
+            dataset_dir=dataset_dir,
+            output_dir=output_dir,
+            manifest=null_task_id_manifest,
+            run_id="run-1",
+            attempt_id="attempt-1",
+            config_digest=DIGEST_D,
+            require_identities=False,
+        )
+
+    # Oversized native_paths rejected before resolving any paths.
+    valid_manifest = _manifest_with_identities()
+    _create_files(dataset_dir, valid_manifest)
+    tracker = InputMembership(
+        dataset_dir=dataset_dir,
+        output_dir=output_dir,
+        manifest=valid_manifest,
+        run_id=str(uuid.uuid4()),
+        attempt_id=str(uuid.uuid4()),
+        config_digest=DIGEST_D,
+        dataset_id=valid_manifest["dataset_id"],
+        dataset_sha256=valid_manifest["dataset_sha256"],
+    )
+    resolve_calls = 0
+    real_resolve = Path.resolve
+
+    def _counting_resolve(self: Path, strict: bool = False) -> Path:
+        nonlocal resolve_calls
+        resolve_calls += 1
+        return real_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _counting_resolve)
+    with pytest.raises(InputMismatchError, match="limit"):
+        tracker.observe("train", ["images/train/t0.jpg"] * (MAX_MEMBERS + 1))
+    assert resolve_calls == 0

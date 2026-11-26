@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -38,6 +39,20 @@ from yoao_plugin_sdk.trainer.protocol import (
 from yoao_plugin_sdk.trainer.runtime import SUPERVISOR_OWNED_ARTIFACTS
 
 _CHECKPOINT_NAME_RE = re.compile(r"^checkpoint-([0-9]{1,4})\.[a-zA-Z0-9_-]{1,32}$")
+_INPUT_MEMBERSHIP_FIELDS = frozenset(
+    {
+        "schema",
+        "policy_digest",
+        "run_id",
+        "attempt_id",
+        "config_digest",
+        "dataset_id",
+        "dataset_sha256",
+        "members_digest",
+        "members",
+        "counts",
+    }
+)
 
 
 class CheckResultV1(BaseModel):
@@ -178,17 +193,23 @@ def _set_tree_readonly(root: Path) -> None:
 
 
 def _restore_tree_writable(root: Path) -> None:
-    if not root.exists():
+    if root.is_symlink() or not root.exists():
         return
-    try:
-        os.chmod(root, 0o755)
-    except OSError:
-        pass
-    for path in sorted(root.rglob("*"), key=lambda p: len(p.parts)):
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        if current.is_symlink():
+            continue
         try:
-            os.chmod(path, 0o755 if path.is_dir() else 0o644)
+            is_dir = current.is_dir()
+            os.chmod(current, 0o755 if is_dir else 0o644)
         except OSError:
-            pass
+            continue
+        if is_dir:
+            try:
+                stack.extend(current.iterdir())
+            except OSError:
+                pass
 
 
 def _cpu_env() -> dict[str, str]:
@@ -232,18 +253,78 @@ def _select_probe_target(caps: TrainerCapabilitiesV1) -> tuple[str, str, list[st
     return chosen_arch.id, chosen_task, [item for _, item in ranked]
 
 
+def _terminate_process_group(proc: subprocess.Popen[str], sig: int) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(proc.pid, sig)
+            return
+        except ProcessLookupError:
+            return
+    try:
+        proc.send_signal(sig)
+    except ProcessLookupError:
+        pass
+
+
+def _kill_process_group(proc: subprocess.Popen[str]) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+            return
+        except ProcessLookupError:
+            return
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
+
+
+def _reap_killed_process(proc: subprocess.Popen[str]) -> None:
+    try:
+        proc.communicate(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        if proc.stdout is not None:
+            proc.stdout.close()
+        if proc.stderr is not None:
+            proc.stderr.close()
+        proc.wait()
+
+
 def _run_subprocess(
     cmd: list[str], *, timeout_seconds: float, env: dict[str, str]
 ) -> tuple[subprocess.CompletedProcess[str] | None, str | None]:
     try:
-        completed = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_seconds, env=env, check=False
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+            start_new_session=(os.name == "posix"),
         )
-        return completed, None
-    except subprocess.TimeoutExpired:
-        return None, f"command timed out after {timeout_seconds}s"
     except OSError as exc:
         return None, f"failed to launch entrypoint: {exc}"
+
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(proc)
+        _reap_killed_process(proc)
+        return None, f"command timed out after {timeout_seconds}s"
+    except BaseException:
+        _kill_process_group(proc)
+        _reap_killed_process(proc)
+        raise
+
+    return (
+        subprocess.CompletedProcess(
+            args=cmd,
+            returncode=proc.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        ),
+        None,
+    )
 
 
 def _probe_validate_config(
@@ -492,6 +573,8 @@ def _prepare_train_spec(
 
 
 def _verify_events_jsonl(events_path: Path) -> tuple[bool, str, int]:
+    if events_path.is_symlink():
+        return False, "events.jsonl must not be a symlink", 0
     if not events_path.is_file():
         return False, "events.jsonl was not written", 0
     lines = events_path.read_text(encoding="utf-8").splitlines()
@@ -519,6 +602,8 @@ def _verify_file_entry(
     target = directory / filename
     if target.is_symlink() or not target.is_file():
         return f"{label} {filename!r} is missing or is a symlink"
+    if type(expected_size) is not int or expected_size < 0:
+        return f"{label} {filename!r} size_bytes must be a non-negative integer"
     if digest_file(target) != expected_sha:
         return f"{label} {filename!r} sha256 mismatch"
     if target.stat().st_size != expected_size:
@@ -528,8 +613,12 @@ def _verify_file_entry(
 
 def _verify_checkpoint_metadata(output_dir: Path) -> str | None:
     meta_path = output_dir / "checkpoint.json"
-    if not meta_path.is_file():
+    if meta_path.is_symlink():
+        return "checkpoint.json must not be a symlink"
+    if not meta_path.exists():
         return None
+    if not meta_path.is_file():
+        return "checkpoint.json must be a regular file"
     try:
         doc = json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -537,15 +626,21 @@ def _verify_checkpoint_metadata(output_dir: Path) -> str | None:
     if not isinstance(doc, dict):
         return "checkpoint.json must be a JSON object"
     name = doc.get("name")
-    if not isinstance(name, str) or not _CHECKPOINT_NAME_RE.fullmatch(name):
+    match = _CHECKPOINT_NAME_RE.fullmatch(name) if isinstance(name, str) else None
+    if match is None:
         return f"checkpoint.json name {name!r} does not match checkpoint-NNNN.<ext>"
     if doc.get("role") != "checkpoint":
         return f"checkpoint.json role must be 'checkpoint', got {doc.get('role')!r}"
     epoch = doc.get("epoch")
     if type(epoch) is not int or not 1 <= epoch <= 9999:
         return f"checkpoint.json epoch must be int in 1..9999, got {epoch!r}"
+    if int(match.group(1)) != epoch:
+        return f"checkpoint.json filename epoch {int(match.group(1))} does not match epoch {epoch}"
+    size_bytes = doc.get("size_bytes")
+    if type(size_bytes) is not int or size_bytes <= 0:
+        return f"checkpoint.json size_bytes must be a positive integer, got {size_bytes!r}"
     return _verify_file_entry(
-        output_dir, name, doc.get("sha256"), doc.get("size_bytes"), "checkpoint file"
+        output_dir, name, doc.get("sha256"), size_bytes, "checkpoint file"
     )
 
 
@@ -554,38 +649,95 @@ def _verify_input_membership(
     receipt: TrainReceiptV1,
     spec: TrainSpecV1,
     dataset_info: dict[str, Any],
+    caps: TrainerCapabilitiesV1,
 ) -> CheckResultV1:
-    declared = [art for art in receipt.artifacts if art.role == "input_membership"]
-    path = output_dir / (declared[0].filename if declared else "input-membership.json")
-    if not declared and not path.is_file():
+    role_declared = [art for art in receipt.artifacts if art.role == "input_membership"]
+    name_declared = [art for art in receipt.artifacts if art.filename == "input-membership.json"]
+    path = output_dir / "input-membership.json"
+    file_present = path.exists() or path.is_symlink()
+
+    if len(role_declared) > 1:
+        return _fail(
+            "input_membership",
+            "TrainReceiptV1 declared multiple input_membership artifacts",
+        )
+    if role_declared and role_declared[0].filename != "input-membership.json":
+        return _fail(
+            "input_membership",
+            f"input_membership artifact must be named 'input-membership.json', got {role_declared[0].filename!r}",
+        )
+    if name_declared and name_declared[0].role != "input_membership":
+        return _fail(
+            "input_membership",
+            f"artifact 'input-membership.json' must have role='input_membership', got {name_declared[0].role!r}",
+        )
+
+    if not role_declared:
+        if file_present:
+            return _fail(
+                "input_membership",
+                "input-membership.json exists on disk but is not declared in TrainReceiptV1.artifacts with role='input_membership'",
+            )
+        if "input_membership" in caps.policy_digests:
+            return _fail(
+                "input_membership",
+                "capabilities declare policy_digests['input_membership'] but TrainReceiptV1 omitted input-membership.json",
+            )
         return _skip("input_membership", "input-membership.json not declared by plugin")
-    if not path.is_file() or path.is_symlink():
+
+    if path.is_symlink() or not path.is_file():
         return _fail("input_membership", f"declared input membership file {path.name!r} missing or symlink")
     try:
         proof = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return _fail("input_membership", f"input-membership.json is invalid JSON: {exc}")
     expected_contract = dataset_info["membership_contract"]
-    if not isinstance(proof, dict) or proof.get("schema") != 1:
-        return _fail("input_membership", "input-membership.json must be a schema=1 JSON object")
-    if proof.get("policy_digest") != POLICY_DIGEST:
+    if not isinstance(proof, dict):
+        return _fail("input_membership", "input-membership.json must be a JSON object")
+    if set(proof) != _INPUT_MEMBERSHIP_FIELDS:
         return _fail(
             "input_membership",
-            f"input-membership.json policy_digest {proof.get('policy_digest')!r} != expected {POLICY_DIGEST!r}",
+            f"input-membership.json keys {sorted(proof)!r} do not match expected schema keys",
         )
-    if proof.get("members_digest") != expected_contract["members_digest"]:
-        return _fail("input_membership", "input-membership.json members_digest does not match frozen dataset contract")
-    if proof.get("counts") != expected_contract["counts"]:
+    if type(proof["schema"]) is not int or proof["schema"] != 1:
+        return _fail("input_membership", "input-membership.json schema must be integer 1")
+    if proof["policy_digest"] != POLICY_DIGEST:
         return _fail(
             "input_membership",
-            f"input-membership.json counts {proof.get('counts')!r} != {expected_contract['counts']!r}",
+            f"input-membership.json policy_digest {proof['policy_digest']!r} != expected {POLICY_DIGEST!r}",
         )
-    if proof.get("run_id") != spec.run_id or proof.get("attempt_id") != spec.attempt_id:
+    if proof["members_digest"] != expected_contract["members_digest"]:
+        return _fail(
+            "input_membership",
+            "input-membership.json members_digest does not match frozen dataset contract",
+        )
+    counts = proof["counts"]
+    if (
+        not isinstance(counts, dict)
+        or not all(type(v) is int for v in counts.values())
+        or counts != expected_contract["counts"]
+    ):
+        return _fail(
+            "input_membership",
+            f"input-membership.json counts {counts!r} != {expected_contract['counts']!r}",
+        )
+    if proof["run_id"] != spec.run_id or proof["attempt_id"] != spec.attempt_id:
         return _fail("input_membership", "input-membership.json run_id/attempt_id mismatch")
-    if proof.get("config_digest") != spec.config_digest:
+    if proof["config_digest"] != spec.config_digest:
         return _fail("input_membership", "input-membership.json config_digest mismatch")
-    members = proof.get("members")
-    if not isinstance(members, dict) or canonical_json_digest(members) != proof["members_digest"]:
+    if (
+        proof["dataset_id"] != dataset_info["dataset_id"]
+        or proof["dataset_sha256"] != dataset_info["dataset_sha256"]
+    ):
+        return _fail("input_membership", "input-membership.json dataset_id/dataset_sha256 mismatch")
+    members = proof["members"]
+    if not isinstance(members, dict):
+        return _fail("input_membership", "input-membership.json members must be a JSON object")
+    try:
+        members_digest = canonical_json_digest(members)
+    except ValueError as exc:
+        return _fail("input_membership", f"input-membership.json members invalid JSON values: {exc}")
+    if members_digest != proof["members_digest"]:
         return _fail("input_membership", "input-membership.json members digest does not match members body")
     return _ok(
         "input_membership",
@@ -629,6 +781,8 @@ def _check_train_and_membership(
         return _fail("train", f"train exited {proc.returncode}: {proc.stderr.strip()}"), im_blocked
 
     result_path = train_out / "result.json"
+    if result_path.is_symlink():
+        return _fail("train", "result.json must not be a symlink"), im_blocked
     if not result_path.is_file():
         return _fail("train", "result.json was not written"), im_blocked
     try:
@@ -672,7 +826,7 @@ def _check_train_and_membership(
             artifact_count=len(receipt.artifacts),
             artifacts=[a.filename for a in receipt.artifacts],
         ),
-        _verify_input_membership(train_out, receipt, spec, dataset_info),
+        _verify_input_membership(train_out, receipt, spec, dataset_info, caps),
     )
 
 
@@ -704,20 +858,23 @@ def _check_cancel(
             stderr=subprocess.PIPE,
             text=True,
             env=env,
+            start_new_session=(os.name == "posix"),
         )
     except OSError as exc:
         return _fail("cancel", f"failed to launch entrypoint for cancel check: {exc}")
 
     events_path = cancel_out / "events.jsonl"
     wait_start = time.monotonic()
-    signal_wait_limit = min(max(timeout_seconds * 0.25, 0.5), 2.0)
+    signal_wait_limit = min(max(timeout_seconds * 0.5, 2.0), 15.0)
     sent_signal = False
     try:
         while proc.poll() is None:
-            if (events_path.is_file() and events_path.stat().st_size > 0) or (
-                time.monotonic() - wait_start >= signal_wait_limit
-            ):
-                proc.send_signal(signal.SIGTERM)
+            if (
+                not events_path.is_symlink()
+                and events_path.is_file()
+                and events_path.stat().st_size > 0
+            ) or (time.monotonic() - wait_start >= signal_wait_limit):
+                _terminate_process_group(proc, signal.SIGTERM)
                 sent_signal = True
                 break
             time.sleep(0.005)
@@ -725,13 +882,13 @@ def _check_cancel(
         try:
             _stdout, stderr = proc.communicate(timeout=cancel_grace)
         except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.communicate()
+            _kill_process_group(proc)
+            _reap_killed_process(proc)
             return _fail("cancel", f"process ignored SIGTERM and did not exit within {cancel_grace:.1f}s")
     finally:
         if proc.poll() is None:
-            proc.kill()
-            proc.communicate()
+            _kill_process_group(proc)
+            _reap_killed_process(proc)
 
     if not sent_signal:
         return _fail("cancel", f"process exited ({proc.returncode}) before SIGTERM could be delivered")
@@ -739,6 +896,8 @@ def _check_cancel(
         suffix = f": {stderr.strip()}" if stderr.strip() else ""
         return _fail("cancel", f"expected exit code 130 after SIGTERM, got {proc.returncode}{suffix}")
     result_path = cancel_out / "result.json"
+    if result_path.is_symlink():
+        return _fail("cancel", "cancel result.json must not be a symlink")
     if not result_path.is_file():
         return _fail("cancel", "SIGTERM exited 130 but omitted result.json")
     try:
@@ -823,6 +982,8 @@ def _check_preview(
     if proc.returncode != 0:
         return _fail("preview", f"preview exited {proc.returncode}: {proc.stderr.strip()}")
     report_path = preview_out / "report.json"
+    if report_path.is_symlink():
+        return _fail("preview", "report.json must not be a symlink")
     if not report_path.is_file():
         return _fail("preview", "preview did not write report.json")
     try:
@@ -868,6 +1029,13 @@ def check_trainer_plugin(
     timeout_seconds: float = 60.0,
 ) -> TrainerCheckReport:
     """Verify a yoao-trainer/v1 plugin offline against synthetic read-only data."""
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not math.isfinite(timeout_seconds)
+        or timeout_seconds <= 0
+    ):
+        raise ValueError("timeout_seconds must be a finite positive number")
     cmd = _normalize_entrypoint(entrypoint)
     env = _cpu_env()
     checks: dict[str, CheckResultV1] = {}
@@ -929,7 +1097,7 @@ def check_trainer_plugin(
                         timeout_seconds=timeout_seconds, env=env,
                     )
         finally:
-            _restore_tree_writable(dataset_root)
+            _restore_tree_writable(work_dir)
 
     return TrainerCheckReport(
         entrypoint=cmd, passed=all(c.passed for c in checks.values()), checks=checks

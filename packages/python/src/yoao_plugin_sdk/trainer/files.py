@@ -50,8 +50,9 @@ def atomic_write_bytes(
     fd, tmp_name = tempfile.mkstemp(prefix=".tmp-", dir=str(target.parent))
     fd_open = True
     try:
-        with os.fdopen(fd, "wb") as stream:
-            fd_open = False
+        stream = os.fdopen(fd, "wb")
+        fd_open = False
+        with stream:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
@@ -60,7 +61,10 @@ def atomic_write_bytes(
         sync_directory(target.parent)
     except BaseException:
         if fd_open:
-            os.close(fd)
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         if os.path.exists(tmp_name):
             os.unlink(tmp_name)
         raise
@@ -75,7 +79,11 @@ def immutable_copy(
     src = Path(source)
     dst = Path(destination)
     dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.is_symlink():
+        raise ValueError("Immutable artifact destination must not be a symlink")
     if dst.exists():
+        if not dst.is_file():
+            raise ValueError("Immutable artifact destination must be a regular file")
         dst_digest = digest_file(dst)
         if digest_file(src) != dst_digest:
             raise ValueError("Immutable artifact already exists with different content")
@@ -84,30 +92,37 @@ def immutable_copy(
             "sha256": dst_digest,
             "size_bytes": dst.stat().st_size,
         }
-    fd, tmp_name = tempfile.mkstemp(prefix=".tmp-", dir=str(dst.parent))
-    fd_open = True
     hasher = hashlib.sha256()
-    try:
-        with src.open("rb") as original, os.fdopen(fd, "wb") as copy_stream:
+    size_bytes = 0
+    with src.open("rb") as original:
+        fd, tmp_name = tempfile.mkstemp(prefix=".tmp-", dir=str(dst.parent))
+        fd_open = True
+        try:
+            copy_stream = os.fdopen(fd, "wb")
             fd_open = False
-            for chunk in iter(lambda: original.read(1024 * 1024), b""):
-                hasher.update(chunk)
-                copy_stream.write(chunk)
-            copy_stream.flush()
-            os.fsync(copy_stream.fileno())
-        os.chmod(tmp_name, mode)
-        os.replace(tmp_name, dst)
-        sync_directory(dst.parent)
-    except BaseException:
-        if fd_open:
-            os.close(fd)
-        if os.path.exists(tmp_name):
-            os.unlink(tmp_name)
-        raise
+            with copy_stream:
+                for chunk in iter(lambda: original.read(1024 * 1024), b""):
+                    hasher.update(chunk)
+                    copy_stream.write(chunk)
+                    size_bytes += len(chunk)
+                copy_stream.flush()
+                os.fsync(copy_stream.fileno())
+            os.chmod(tmp_name, mode)
+            os.replace(tmp_name, dst)
+            sync_directory(dst.parent)
+        except BaseException:
+            if fd_open:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            if os.path.exists(tmp_name):
+                os.unlink(tmp_name)
+            raise
     return {
         "name": dst.name,
         "sha256": hasher.hexdigest(),
-        "size_bytes": dst.stat().st_size,
+        "size_bytes": size_bytes,
     }
 
 

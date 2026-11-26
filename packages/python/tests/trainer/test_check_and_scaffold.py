@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -11,13 +13,15 @@ from yoao_plugin_sdk.trainer._scaffold import init_trainer_example
 from yoao_plugin_sdk.trainer.check import TrainerCheckReport, check_trainer_plugin
 
 
-def _write_mutated_trainer(target: Path, defect: str) -> list[str]:
+def _write_mutated_trainer(target: Path, defect: str, *, extra_env_file: Path | None = None) -> list[str]:
     script = target / f"buggy_{defect}.py"
     script.write_text(
         f'''from __future__ import annotations
 import json
+import os
 from pathlib import Path
 import signal
+import subprocess
 import sys
 import time
 
@@ -52,16 +56,30 @@ from yoao_plugin_sdk.trainer import (
 )
 
 DEFECT = {defect!r}
+MARKER_FILE = {str(extra_env_file) if extra_env_file is not None else ""!r}
 SCHEMA_ID = "buggy-detect-1"
 SCHEMA_DIGEST = canonical_json_digest({{"schema": SCHEMA_ID}})
 
 
 class BuggyTrainer:
     def describe(self) -> TrainerCapabilitiesV1:
+        if DEFECT == "timeout_with_grandchild":
+            child = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(60)"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            Path(MARKER_FILE).write_text(str(child.pid), encoding="utf-8")
+            time.sleep(60)
         contracts = (
             ["custom-seg-only-1", "ultralytics-bbox-1"]
             if DEFECT == "contract_fallback"
             else ["ultralytics-bbox-1"]
+        )
+        policy_digests = (
+            {{}}
+            if DEFECT in {{"undeclared_im_file", "symlink_im_undeclared", "no_im_optional"}}
+            else {{"input_membership": POLICY_DIGEST}}
         )
         return TrainerCapabilitiesV1(
             protocol_version=TRAINER_PROTOCOL_VERSION,
@@ -73,7 +91,7 @@ class BuggyTrainer:
             architectures=[
                 TrainerArchitectureV1(id="buggy-n", family="buggy", tasks=["detect"])
             ],
-            policy_digests={{"input_membership": POLICY_DIGEST}},
+            policy_digests=policy_digests,
             serving_compatibility=[ServingCompatibilityV1(framework="buggy", format=None)],
         )
 
@@ -105,6 +123,15 @@ class BuggyTrainer:
         output_dir.mkdir(parents=True, exist_ok=True)
         if DEFECT == "ignore_sigterm":
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        elif DEFECT == "cancel_timeout_grandchild":
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            if int(spec.parameters.get("epochs", 2)) >= 10:
+                child = subprocess.Popen(
+                    [sys.executable, "-c", "import time; time.sleep(60)"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                Path(MARKER_FILE).write_text(str(child.pid), encoding="utf-8")
         elif DEFECT == "omit_cancel_receipt":
             def _exit_no_receipt(_signum, _frame):
                 raise SystemExit(130)
@@ -147,13 +174,45 @@ class BuggyTrainer:
             bad_proof = dict(mem_res.proof)
             bad_proof["policy_digest"] = "0" * 64
             atomic_write_json(mem_res.path, bad_proof)
+        elif DEFECT == "im_schema_bool":
+            bad_proof = dict(mem_res.proof)
+            bad_proof["schema"] = True
+            atomic_write_json(mem_res.path, bad_proof)
+        elif DEFECT == "im_extra_key":
+            bad_proof = dict(mem_res.proof)
+            bad_proof["extra"] = 1
+            atomic_write_json(mem_res.path, bad_proof)
+        elif DEFECT == "im_counts_bool":
+            bad_proof = dict(mem_res.proof)
+            bad_proof["counts"] = {{"train": 2, "val": True}}
+            atomic_write_json(mem_res.path, bad_proof)
+        elif DEFECT == "im_wrong_dataset_id":
+            bad_proof = dict(mem_res.proof)
+            bad_proof["dataset_id"] = "00000000-0000-0000-0000-000000000000"
+            atomic_write_json(mem_res.path, bad_proof)
 
         weights = output_dir / "best.pt"
         weights.write_bytes(b"weights")
-        artifacts = [
-            build_artifact_entry("weights", weights),
-            build_artifact_entry("input_membership", mem_res.path),
-        ]
+        artifacts = [build_artifact_entry("weights", weights)]
+        if DEFECT == "omit_declared_im":
+            mem_res.path.unlink()
+        elif DEFECT == "undeclared_im_file":
+            pass
+        elif DEFECT == "symlink_im_undeclared":
+            real_im = output_dir / "real-im.json"
+            mem_res.path.rename(real_im)
+            os.symlink(real_im, mem_res.path)
+        elif DEFECT == "im_wrong_filename":
+            renamed = output_dir / "custom-im.json"
+            mem_res.path.rename(renamed)
+            artifacts.append(build_artifact_entry("input_membership", renamed))
+        elif DEFECT == "im_wrong_role":
+            artifacts.append(build_artifact_entry("extra", mem_res.path))
+        elif DEFECT == "no_im_optional":
+            mem_res.path.unlink()
+        else:
+            artifacts.append(build_artifact_entry("input_membership", mem_res.path))
+
         if DEFECT == "supervisor_owned_artifact":
             owned = output_dir / "manifest.json"
             owned.write_text("{{}}", encoding="utf-8")
@@ -165,11 +224,71 @@ class BuggyTrainer:
                     size_bytes=owned.stat().st_size,
                 )
             )
+        elif DEFECT == "symlink_checkpoint_json":
+            target_meta = output_dir / "real-ckpt.json"
+            target_meta.write_text("{{}}", encoding="utf-8")
+            os.symlink(target_meta, output_dir / "checkpoint.json")
+        elif DEFECT == "ckpt_epoch_mismatch":
+            ckpt_file = output_dir / "checkpoint-0002.pt"
+            ckpt_file.write_bytes(b"ckpt")
+            atomic_write_json(
+                output_dir / "checkpoint.json",
+                {{
+                    "name": ckpt_file.name,
+                    "role": "checkpoint",
+                    "epoch": 1,
+                    "sha256": digest_file(ckpt_file),
+                    "size_bytes": ckpt_file.stat().st_size,
+                }},
+            )
+        elif DEFECT == "ckpt_size_bool":
+            ckpt_file = output_dir / "checkpoint-0001.pt"
+            ckpt_file.write_bytes(b"x")
+            atomic_write_json(
+                output_dir / "checkpoint.json",
+                {{
+                    "name": ckpt_file.name,
+                    "role": "checkpoint",
+                    "epoch": 1,
+                    "sha256": digest_file(ckpt_file),
+                    "size_bytes": True,
+                }},
+            )
+        elif DEFECT == "ckpt_size_zero":
+            ckpt_file = output_dir / "checkpoint-0001.pt"
+            ckpt_file.write_bytes(b"")
+            atomic_write_json(
+                output_dir / "checkpoint.json",
+                {{
+                    "name": ckpt_file.name,
+                    "role": "checkpoint",
+                    "epoch": 1,
+                    "sha256": digest_file(ckpt_file),
+                    "size_bytes": 0,
+                }},
+            )
+        elif DEFECT == "readonly_output_subdir":
+            ro_dir = output_dir / "ro-subdir"
+            ro_dir.mkdir(parents=True, exist_ok=True)
+            ro_file = ro_dir / "locked.txt"
+            ro_file.write_text("locked", encoding="utf-8")
+            os.chmod(ro_file, 0o444)
+            os.chmod(ro_dir, 0o555)
+
         receipt = TrainReceiptV1(
             protocol_version=TRAINER_PROTOCOL_VERSION,
             status="succeeded",
             artifacts=artifacts,
         )
+        if DEFECT == "symlink_events_jsonl":
+            real_events = output_dir / "real-events.jsonl"
+            (output_dir / "events.jsonl").rename(real_events)
+            os.symlink(real_events, output_dir / "events.jsonl")
+        if DEFECT == "symlink_result_json":
+            real_result = output_dir / "real-result.json"
+            atomic_write_json(real_result, receipt)
+            os.symlink(real_result, output_dir / "result.json")
+            return 0  # type: ignore[return-value]
         atomic_write_json(output_dir / "result.json", receipt)
         return receipt
 
@@ -201,7 +320,7 @@ class BuggyTrainer:
             }}
             atomic_write_json(output_dir / "report.json", raw)
             return 0  # type: ignore[return-value]
-        return PreviewReportV1(
+        report = PreviewReportV1(
             protocol_version=TRAINER_PROTOCOL_VERSION,
             status="succeeded",
             input_digest=spec.input_digest,
@@ -218,6 +337,12 @@ class BuggyTrainer:
                 )
             ],
         )
+        if DEFECT == "symlink_report_json":
+            real_report = output_dir / "real-report.json"
+            atomic_write_json(real_report, report)
+            os.symlink(real_report, output_dir / "report.json")
+            return 0  # type: ignore[return-value]
+        return report
 
 
 if __name__ == "__main__":
@@ -243,8 +368,29 @@ def test_scaffold_example_passes_full_contract_check_and_own_tests(tmp_path: Pat
     assert (project_dir / "demo_trainer.py").is_file()
     assert (project_dir / "tests" / "test_demo_trainer.py").is_file()
 
+    demo_src = (project_dir / "demo_trainer.py").read_text(encoding="utf-8")
+    assert "\nimport json\n" not in demo_src
+    assert "atomic_write_bytes(weights_path," in demo_src
+    assert "atomic_write_bytes(out_img," in demo_src
+
     with pytest.raises(FileExistsError):
         init_trainer_example(project_dir)
+
+    # Actually run the generated plugin's own pytest suite.
+    test_env = dict(os.environ)
+    existing_pp = test_env.get("PYTHONPATH", "")
+    test_env["PYTHONPATH"] = (
+        f"{project_dir}{os.pathsep}{existing_pp}" if existing_pp else str(project_dir)
+    )
+    own_tests = subprocess.run(
+        [sys.executable, "-m", "pytest", str(project_dir / "tests" / "test_demo_trainer.py"), "-q"],
+        cwd=str(project_dir),
+        env=test_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert own_tests.returncode == 0, own_tests.stdout + own_tests.stderr
 
     report = check_trainer_plugin(
         [sys.executable, str(project_dir / "demo_trainer.py")],
@@ -343,3 +489,116 @@ def test_check_and_scaffold_stay_out_of_trainer_init_and_cli_version() -> None:
     out = subprocess.check_output([sys.executable, "-c", probe], text=True)
     lines = out.strip().splitlines()
     assert json.loads(lines[-1]) == []
+
+
+def test_check_trainer_plugin_hardening_invariants(tmp_path: Path) -> None:
+    # 1. Invalid timeout_seconds rejected up front.
+    for bad_timeout in (float("nan"), float("inf"), float("-inf"), 0.0, -1.0, True):
+        with pytest.raises(ValueError, match="timeout_seconds"):
+            check_trainer_plugin(["echo"], timeout_seconds=bad_timeout)  # type: ignore[arg-type]
+
+    # 2. Input membership strict declaration, pairing, schema, types, and identity checks.
+    for defect, expected_substr in (
+        ("omit_declared_im", "omitted input-membership.json"),
+        ("undeclared_im_file", "exists on disk"),
+        ("symlink_im_undeclared", "exists on disk"),
+        ("im_wrong_filename", "input-membership.json"),
+        ("im_wrong_role", "role='input_membership'"),
+        ("im_schema_bool", "schema must be integer 1"),
+        ("im_extra_key", "schema keys"),
+        ("im_counts_bool", "counts"),
+        ("im_wrong_dataset_id", "dataset_id/dataset_sha256"),
+    ):
+        rep = check_trainer_plugin(_write_mutated_trainer(tmp_path, defect))
+        assert rep.passed is False, f"{defect} unexpectedly passed"
+        assert rep.checks["train"].passed is True, f"{defect}: {rep.checks['train'].detail}"
+        assert rep.checks["input_membership"].passed is False, defect
+        assert expected_substr in rep.checks["input_membership"].detail, (
+            defect,
+            rep.checks["input_membership"].detail,
+        )
+
+    # Optional input_membership still skips cleanly when policy_digests and disk both omit it.
+    rep_opt = check_trainer_plugin(_write_mutated_trainer(tmp_path, "no_im_optional"))
+    assert rep_opt.passed is True, rep_opt.model_dump()
+    assert rep_opt.checks["input_membership"].skipped is True
+
+    # 3. Symlink and checkpoint hardening.
+    for defect, expected_substr in (
+        ("symlink_checkpoint_json", "symlink"),
+        ("ckpt_epoch_mismatch", "does not match epoch"),
+        ("ckpt_size_bool", "positive integer"),
+        ("ckpt_size_zero", "positive integer"),
+        ("symlink_events_jsonl", "symlink"),
+        ("symlink_result_json", "symlink"),
+    ):
+        rep = check_trainer_plugin(_write_mutated_trainer(tmp_path, defect))
+        assert rep.passed is False, f"{defect} unexpectedly passed"
+        assert rep.checks["train"].passed is False, defect
+        assert expected_substr in rep.checks["train"].detail, (
+            defect,
+            rep.checks["train"].detail,
+        )
+
+    rep_sym_preview = check_trainer_plugin(
+        _write_mutated_trainer(tmp_path, "symlink_report_json"),
+        skip_train=True,
+        check_preview=True,
+    )
+    assert rep_sym_preview.passed is False
+    assert rep_sym_preview.checks["preview"].passed is False
+    assert "symlink" in rep_sym_preview.checks["preview"].detail
+
+    # 4. Read-only subdirectory created by plugin inside output dir is cleaned up without error.
+    rep_ro = check_trainer_plugin(_write_mutated_trainer(tmp_path, "readonly_output_subdir"))
+    assert rep_ro.passed is True, rep_ro.model_dump()
+
+    # 5. _verify_file_entry directly rejects bool expected_size even when file size is 1 byte.
+    from yoao_plugin_sdk.trainer.check import _verify_file_entry
+    from yoao_plugin_sdk.trainer.files import digest_file
+
+    one_byte = tmp_path / "one.bin"
+    one_byte.write_bytes(b"x")
+    err = _verify_file_entry(tmp_path, one_byte.name, digest_file(one_byte), True, "artifact")
+    assert err is not None and "integer" in err
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group kill verification")
+def test_check_trainer_plugin_kills_grandchildren_on_timeout_and_cancel(tmp_path: Path) -> None:
+    def _assert_pid_dead(pid: int) -> None:
+        deadline = time.monotonic() + 2.0
+        try:
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    return
+                time.sleep(0.05)
+            pytest.fail(f"grandchild PID {pid} survived process-group kill")
+        finally:
+            try:
+                os.kill(pid, 9)
+            except ProcessLookupError:
+                pass
+
+    # 1. Timeout in _run_subprocess kills grandchild.
+    pid_file_timeout = tmp_path / "grandchild-timeout.pid"
+    cmd_timeout = _write_mutated_trainer(
+        tmp_path, "timeout_with_grandchild", extra_env_file=pid_file_timeout
+    )
+    rep_timeout = check_trainer_plugin(cmd_timeout, skip_train=True, timeout_seconds=0.8)
+    assert rep_timeout.passed is False
+    assert "timed out" in rep_timeout.checks["describe"].detail
+    assert pid_file_timeout.is_file()
+    _assert_pid_dead(int(pid_file_timeout.read_text(encoding="utf-8").strip()))
+
+    # 2. Cancel grace timeout in _check_cancel kills grandchild.
+    pid_file_cancel = tmp_path / "grandchild-cancel.pid"
+    cmd_cancel = _write_mutated_trainer(
+        tmp_path, "cancel_timeout_grandchild", extra_env_file=pid_file_cancel
+    )
+    rep_cancel = check_trainer_plugin(cmd_cancel, timeout_seconds=1.5)
+    assert rep_cancel.passed is False
+    assert rep_cancel.checks["cancel"].passed is False
+    assert pid_file_cancel.is_file()
+    _assert_pid_dead(int(pid_file_cancel.read_text(encoding="utf-8").strip()))

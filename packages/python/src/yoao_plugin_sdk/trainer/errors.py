@@ -32,6 +32,14 @@ class DatasetContractError(InputMismatchError):
         self.code = code
 
 
+def _clean_text(text: str, *, max_length: int = 2048) -> str:
+    cleaned = "".join(" " if ord(ch) < 0x20 or ord(ch) == 0x7F else ch for ch in text)
+    collapsed = " ".join(cleaned.split())
+    if len(collapsed) > max_length:
+        collapsed = collapsed[:max_length].rstrip()
+    return collapsed
+
+
 def classify_failure(exc: BaseException) -> str:
     torch_mod = sys.modules.get("torch")
     if torch_mod is not None:
@@ -41,18 +49,10 @@ def classify_failure(exc: BaseException) -> str:
             return "cuda_oom"
     code = getattr(exc, "failure_code", None)
     if isinstance(code, str):
-        cleaned = code.strip()
+        cleaned = _clean_text(code, max_length=64)
         if cleaned:
             return cleaned
     return "native_exception"
-
-
-def _clean_text(text: str) -> str:
-    cleaned = "".join(" " if ord(ch) < 0x20 or ord(ch) == 0x7F else ch for ch in text)
-    collapsed = " ".join(cleaned.split())
-    if len(collapsed) > 2048:
-        collapsed = collapsed[:2048].rstrip()
-    return collapsed
 
 
 def sanitize_failure_message(

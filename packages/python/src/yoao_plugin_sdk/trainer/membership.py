@@ -169,6 +169,15 @@ def has_member_identities(manifest: dict[str, Any]) -> bool:
     )
 
 
+def _declares_member_identities(manifest: Any) -> bool:
+    if not isinstance(manifest, dict):
+        return False
+    samples = manifest.get("samples")
+    return isinstance(samples, list) and any(
+        isinstance(sample, dict) and "task_id" in sample for sample in samples
+    )
+
+
 @dataclass(frozen=True)
 class InputMembershipResult:
     path: Path
@@ -205,7 +214,7 @@ class InputMembership:
         self.dataset_sha256 = dataset_sha256
         self.require_identities = bool(require_identities)
         self.has_identities = (
-            True if self.require_identities else has_member_identities(manifest)
+            True if self.require_identities else _declares_member_identities(manifest)
         )
         self.members: dict[str, Any] = {}
         self.contract: dict[str, Any] | None = None
@@ -257,6 +266,8 @@ class InputMembership:
                     seen_images.add(str(image))
                     seen_labels.add(str(label))
                     by_split[split].append(str(image))
+                if not all(by_split.values()):
+                    raise ValueError("Frozen training and validation members are required")
                 self.expected_paths = by_split
         except (ValueError, KeyError, TypeError) as exc:
             raise InputMismatchError(str(exc)) from exc
@@ -264,6 +275,8 @@ class InputMembership:
     def _normalize_paths(self, native_paths: Any) -> list[str]:
         if not isinstance(native_paths, (list, tuple)):
             raise ValueError("Native input paths must be a sequence")
+        if len(native_paths) > MAX_MEMBERS:
+            raise ValueError("Native input members exceed the version limit")
         paths: list[str] = []
         for value in native_paths:
             if not isinstance(value, (str, Path)):

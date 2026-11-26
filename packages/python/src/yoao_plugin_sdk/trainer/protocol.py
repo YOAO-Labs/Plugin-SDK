@@ -631,8 +631,9 @@ def atomic_write_json(
     fd, tmp_name = tempfile.mkstemp(prefix=".tmp-", dir=str(target.parent))
     fd_open = True
     try:
-        with os.fdopen(fd, "wb") as stream:
-            fd_open = False
+        stream = os.fdopen(fd, "wb")
+        fd_open = False
+        with stream:
             stream.write(encoded)
             stream.flush()
             os.fsync(stream.fileno())
@@ -641,7 +642,10 @@ def atomic_write_json(
         _fsync_directory(target.parent)
     except BaseException:
         if fd_open:
-            os.close(fd)
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         if os.path.exists(tmp_name):
             os.unlink(tmp_name)
         raise

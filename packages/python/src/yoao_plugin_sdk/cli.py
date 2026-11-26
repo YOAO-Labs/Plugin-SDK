@@ -267,15 +267,27 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "trainer" and args.trainer_command == "check":
+        import math
         import shlex
 
         from yoao_plugin_sdk.trainer.check import check_trainer_plugin
         from yoao_plugin_sdk.trainer.files import atomic_write_json
         from yoao_plugin_sdk.trainer.protocol import canonical_json_bytes
 
+        if not math.isfinite(args.timeout) or args.timeout <= 0:
+            print(
+                f"Invalid --timeout value {args.timeout!r}: must be a finite positive number",
+                file=sys.stderr,
+            )
+            return 2
+
         cmd: list[str] = []
         if args.entrypoint:
-            cmd = shlex.split(args.entrypoint)
+            try:
+                cmd = shlex.split(args.entrypoint)
+            except ValueError as exc:
+                print(f"Invalid --entrypoint syntax: {exc}", file=sys.stderr)
+                return 2
         elif args.manifest is not None:
             try:
                 loaded_manifest = load_manifest_file(args.manifest)

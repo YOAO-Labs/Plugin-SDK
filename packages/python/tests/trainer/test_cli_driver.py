@@ -303,3 +303,29 @@ def test_trainer_cli_train_and_preview_exit_codes(tmp_path: Path) -> None:
         (out_prev_fail / "report.json").read_text(encoding="utf-8")
     )
     assert failed_report.status == "failed" and failed_report.failure_code == "preview_failed"
+
+    # Dirty failure_code on preview exception is sanitized so PreviewReportV1 validates cleanly.
+    from yoao_plugin_sdk.trainer import TrainerError
+
+    class _DirtyPreviewPlugin(_StubPlugin):
+        def preview(self, spec: PreviewSpecV1, output_dir: Path, *, spec_path: Path | None = None) -> PreviewReportV1:
+            raise TrainerError("bad preview", failure_code="\x00dirty\ncode " + ("z" * 100))
+
+    out_prev_dirty = tmp_path / "prev-dirty"
+    assert (
+        run_trainer_cli(
+            _DirtyPreviewPlugin(),
+            prog="stub-trainer",
+            description="Stub",
+            supports_preview=True,
+            argv=["preview", "--spec", str(prev_spec), "--output", str(out_prev_dirty)],
+        )
+        == 1
+    )
+    dirty_report = PreviewReportV1.model_validate_json(
+        (out_prev_dirty / "report.json").read_text(encoding="utf-8")
+    )
+    assert dirty_report.status == "failed"
+    assert dirty_report.failure_code is not None
+    assert len(dirty_report.failure_code) <= 64
+    assert not any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in dirty_report.failure_code)
