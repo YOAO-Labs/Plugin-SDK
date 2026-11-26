@@ -1,7 +1,21 @@
-"""YOAO trainer plugin protocol models and dependency-free P0 runtime components."""
+"""YOAO trainer plugin protocol models and dependency-free runtime components."""
 
 from __future__ import annotations
 
+from yoao_plugin_sdk.trainer.cli import (
+    TrainerPlugin,
+    build_trainer_parser,
+    run_trainer_cli,
+)
+from yoao_plugin_sdk.trainer.dataset import (
+    LINEAGE_FIELDS,
+    SOURCE_LINEAGE_CONTRACT,
+    ordered_names,
+    validate_frozen_manifest_core,
+    validate_sample_files,
+    validate_source_lineage,
+    validate_yolo_bbox_label,
+)
 from yoao_plugin_sdk.trainer.errors import (
     DatasetContractError,
     InputMismatchError,
@@ -72,8 +86,16 @@ from yoao_plugin_sdk.trainer.runtime import (
     load_dataset_identity,
     run_with_signal_receipt,
 )
+from yoao_plugin_sdk.trainer.validation import (
+    hash_source_files,
+    metrics_of,
+    normalized,
+    optional_package_version,
+    validate_value,
+)
 
 __all__ = [
+    "LINEAGE_FIELDS",
     "MAX_MEMBERS",
     "MEMBER_FIELDS",
     "POLICY_DIGEST",
@@ -90,6 +112,7 @@ __all__ = [
     "PREVIEW_MAX_SOURCE_PIXELS",
     "PREVIEW_SEED_MAX",
     "SHA256_PATTERN",
+    "SOURCE_LINEAGE_CONTRACT",
     "SPLITS",
     "SUPERVISOR_OWNED_ARTIFACTS",
     "TRAINER_PROTOCOL_VERSION",
@@ -114,11 +137,13 @@ __all__ = [
     "TrainerArchitectureV1",
     "TrainerCapabilitiesV1",
     "TrainerError",
+    "TrainerPlugin",
     "ValidateConfigResultV1",
     "ValidationIssueV1",
     "atomic_write_bytes",
     "atomic_write_json",
     "build_artifact_entry",
+    "build_trainer_parser",
     "canonical_json_bytes",
     "canonical_json_digest",
     "classify_failure",
@@ -126,12 +151,23 @@ __all__ = [
     "contract_for",
     "digest_file",
     "has_member_identities",
+    "hash_source_files",
     "immutable_copy",
     "load_dataset_identity",
     "member_records",
+    "metrics_of",
+    "normalized",
     "observed_members",
+    "optional_package_version",
+    "ordered_names",
+    "run_trainer_cli",
     "run_with_signal_receipt",
     "sanitize_failure_message",
     "sync_directory",
+    "validate_frozen_manifest_core",
+    "validate_sample_files",
+    "validate_source_lineage",
+    "validate_value",
+    "validate_yolo_bbox_label",
     "write_event_jsonl",
 ]
