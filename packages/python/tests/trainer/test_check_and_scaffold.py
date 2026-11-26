@@ -132,6 +132,8 @@ class BuggyTrainer:
                     stderr=subprocess.DEVNULL,
                 )
                 Path(MARKER_FILE).write_text(str(child.pid), encoding="utf-8")
+                EventEmitter(output_dir).phase("preparing")
+                time.sleep(60)
         elif DEFECT == "omit_cancel_receipt":
             def _exit_no_receipt(_signum, _frame):
                 raise SystemExit(130)

@@ -315,6 +315,8 @@ def _run_subprocess(
         _kill_process_group(proc)
         _reap_killed_process(proc)
         raise
+    finally:
+        _kill_process_group(proc)
 
     return (
         subprocess.CompletedProcess(
@@ -886,8 +888,8 @@ def _check_cancel(
             _reap_killed_process(proc)
             return _fail("cancel", f"process ignored SIGTERM and did not exit within {cancel_grace:.1f}s")
     finally:
+        _kill_process_group(proc)
         if proc.poll() is None:
-            _kill_process_group(proc)
             _reap_killed_process(proc)
 
     if not sent_signal:
