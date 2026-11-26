@@ -750,3 +750,54 @@ def test_trainer_protocol_negative_invariants(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         atomic_write_json(bad_path, {"loss": float("nan")})
     assert not bad_dir.exists()
+
+
+def test_trainer_package_preserves_exports_and_has_zero_ml_imports() -> None:
+    import subprocess
+    import sys
+
+    import yoao_plugin_sdk.trainer as trainer_pkg
+
+    legacy_exports = {
+        "PREVIEW_MAX_EDGE",
+        "PREVIEW_MAX_OUTPUTS",
+        "PREVIEW_MAX_OUTPUT_BOXES",
+        "PREVIEW_MAX_OUTPUT_BYTES",
+        "PREVIEW_MAX_POOL_BOXES",
+        "PREVIEW_MAX_POOL_BYTES",
+        "PREVIEW_MAX_POOL_PIXELS",
+        "PREVIEW_MAX_SOURCES",
+        "PREVIEW_MAX_SOURCE_BOXES",
+        "PREVIEW_MAX_SOURCE_BYTES",
+        "PREVIEW_MAX_SOURCE_PIXELS",
+        "PREVIEW_SEED_MAX",
+        "SHA256_PATTERN",
+        "TRAINER_PROTOCOL_VERSION",
+        "PreviewOutputV1",
+        "PreviewReportV1",
+        "PreviewSourceV1",
+        "PreviewSpecV1",
+        "ServingCompatibilityV1",
+        "TrainArtifactV1",
+        "TrainEventV1",
+        "TrainReceiptV1",
+        "TrainSpecV1",
+        "TrainerArchitectureV1",
+        "TrainerCapabilitiesV1",
+        "ValidateConfigResultV1",
+        "ValidationIssueV1",
+        "atomic_write_json",
+        "canonical_json_bytes",
+        "canonical_json_digest",
+        "write_event_jsonl",
+    }
+    assert legacy_exports.issubset(set(trainer_pkg.__all__))
+
+    probe = (
+        "import json, sys, yoao_plugin_sdk.trainer; "
+        "forbidden = {'torch', 'torchvision', 'ultralytics', 'libreyolo', 'cv2', 'numpy', 'yaml', 'httpx', 'fastapi'}; "
+        "loaded = sorted(m for m in forbidden if m in sys.modules); "
+        "print(json.dumps(loaded))"
+    )
+    out = subprocess.check_output([sys.executable, "-c", probe], text=True)
+    assert json.loads(out) == []
